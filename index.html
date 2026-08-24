@@ -2690,7 +2690,6 @@ body{
 
   hardTop();
 
-  window.NAMI_generateFromAI = generateFromAI;
 
   document.addEventListener("DOMContentLoaded", function () {
     hardTop();
@@ -7308,6 +7307,7 @@ document.addEventListener("DOMContentLoaded", function(){
     },120);
   },true);
 
+  window.NAMI_generateFromAI = generate;
   window.NAMI_AI_V3={generate,useSelected,get designs(){return designs}};
 })();
 </script>

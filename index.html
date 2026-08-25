@@ -7360,7 +7360,7 @@ document.addEventListener("DOMContentLoaded", function(){
         }
       }catch(e){
         // A temporary polling/network error must NOT close the loading screen.
-        console.warn("NAMI V49 poll retry",e);
+        console.warn("NAMI V48 poll retry",e);
         lastMessage=e?.message||lastMessage;
       }
       await sleep(AI_POLL_INTERVAL_MS);
@@ -7401,16 +7401,16 @@ document.addEventListener("DOMContentLoaded", function(){
           const raw=await res.text();
           if(raw.trim()){
             try{immediateResult=unwrapAiResponse(JSON.parse(raw))}catch(e){
-              console.warn("NAMI V49 start response was not final JSON; switching to polling",e);
+              console.warn("NAMI V48 start response was not final JSON; switching to polling",e);
             }
           }
         }else{
-          console.warn("NAMI V49 start HTTP",res.status,"— keep waiting via result polling");
+          console.warn("NAMI V48 start HTTP",res.status,"— keep waiting via result polling");
         }
       }catch(e){
         // Reverse proxies often close a long webhook request while n8n keeps running.
         // Keep the loading UI alive and recover the result using the client-generated jobId.
-        console.warn("NAMI V49 start request disconnected; continue polling",e);
+        console.warn("NAMI V48 start request disconnected; continue polling",e);
       }
 
       if(immediateResult?.success===true && Array.isArray(immediateResult.designs) && immediateResult.designs.length>=4){
@@ -7421,7 +7421,7 @@ document.addEventListener("DOMContentLoaded", function(){
 
       if(typeof showToast==="function")showToast("สร้าง Design ใหม่ 4 แบบเสร็จแล้ว");
     }catch(e){
-      console.error("NAMI V49 generate failed",e);
+      console.error("NAMI V48 generate failed",e);
       clearAiResultSurface();
       const name=document.getElementById("aiOptionName");
       if(name)name.textContent="สร้างดีไซน์ไม่สำเร็จ — กดสร้างใหม่อีกครั้ง";

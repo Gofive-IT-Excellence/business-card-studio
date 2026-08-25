@@ -3714,6 +3714,9 @@ document.addEventListener("DOMContentLoaded", function(){
   }
 
   function install(){
+    // V48 FIX: once the real n8n AI renderer is present, never let this legacy
+    // static preview overwrite the returned designs.
+    if (window.NAMI_AI_V3 || window.NAMI_generateFromAI) return;
     if(typeof renderAiDesign==="function"){
       const original=renderAiDesign;
       window.renderAiDesign=function(){
@@ -6531,9 +6534,19 @@ document.addEventListener("DOMContentLoaded", function(){
   }
 
   .ai-design-panel{position:relative}
+  /* V48 FIX: while a new request is running, old cards/mockups must never remain visible. */
+  .ai-design-panel.is-ai-loading #aiCardStack,
+  .ai-design-panel.is-ai-loading #aiMockup,
+  .ai-design-panel.is-ai-loading #aiThumbs,
+  .ai-design-panel.is-ai-loading #aiUseDesignBtn,
+  .ai-design-panel.is-ai-loading .ai-option-title{
+    visibility:hidden !important;
+    opacity:0 !important;
+    pointer-events:none !important;
+  }
   .ai-creating-overlay{
-    position:absolute;inset:92px 0 0;z-index:80;display:flex;align-items:flex-start;justify-content:center;
-    padding:120px 28px 40px;border-radius:0 0 20px 20px;background:rgba(250,253,253,.97);
+    position:absolute;left:0;right:0;top:88px;bottom:0;z-index:999;display:flex;align-items:flex-start;justify-content:center;
+    min-height:650px;padding:128px 28px 70px;border-radius:0 0 20px 20px;background:rgba(250,253,253,.988);
     backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)
   }
   .ai-creating-box{width:min(620px,94%);padding:0;text-align:center;background:transparent}
@@ -6573,9 +6586,26 @@ document.addEventListener("DOMContentLoaded", function(){
   // it must never be mistaken for the person's profile on the next generation.
   let sourceAssetCache={profileSrc:"",logoSrc:""};
 
+  function clearAiResultSurface(){
+    // Remove the previous run from the DOM immediately. This prevents the user
+    // from mistaking old designs for the request currently being generated.
+    const stack=document.getElementById("aiCardStack");
+    const mock=document.getElementById("aiMockup");
+    const thumbs=document.getElementById("aiThumbs");
+    if(stack) stack.innerHTML="";
+    if(mock) mock.innerHTML="";
+    if(thumbs) thumbs.innerHTML="";
+    const num=document.getElementById("aiOptionNumber");
+    const name=document.getElementById("aiOptionName");
+    if(num) num.textContent="--";
+    if(name) name.textContent="กำลังสร้างดีไซน์ใหม่";
+  }
+
   function showAiCreating(){
     const panel=document.querySelector(".ai-design-panel");
     if(!panel)return;
+    clearAiResultSurface();
+    panel.classList.add("is-ai-loading");
     document.getElementById("aiCreatingOverlay")?.remove();
     const overlay=document.createElement("div");
     overlay.id="aiCreatingOverlay";overlay.className="ai-creating-overlay";
@@ -6589,23 +6619,30 @@ document.addEventListener("DOMContentLoaded", function(){
         <div class="ai-creating-step is-active">1 วิเคราะห์งาน</div>
         <div class="ai-creating-step">2 สร้างภาพ</div>
         <div class="ai-creating-step">3 จัดวางข้อมูล</div>
-        <div class="ai-creating-step">4 เตรียมแบบ</div>
+        <div class="ai-creating-step">4 สร้าง Mockup</div>
       </div>
     </div>`;
     panel.appendChild(overlay);
-    const messages=["กำลังบันทึกภาพนามบัตรด้านหน้าและด้านหลัง","AI กำลังวิเคราะห์งานต้นฉบับทั้ง 2 ด้าน","กำลังสร้าง Art Direction 4 แบบจากงานจริง","กำลังประกอบข้อมูลจริงและเตรียม Mockup"];
+    const messages=[
+      "กำลังวิเคราะห์นามบัตร รูป และโลโก้",
+      "AI กำลังสร้าง Art Direction 4 แบบ",
+      "กำลังจัดวางข้อมูลและเตรียมแบบ",
+      "กำลังสร้าง Mockup และเตรียมผลลัพธ์"
+    ];
     let index=0;
     clearInterval(creatingTimer);
     creatingTimer=setInterval(()=>{
       index=Math.min(index+1,messages.length-1);
       const status=document.getElementById("aiCreatingStatus");if(status)status.textContent=messages[index];
       document.querySelectorAll(".ai-creating-step").forEach((el,i)=>el.classList.toggle("is-active",i<=index));
-    },26000);
+    },45000);
   }
   function hideAiCreating(){
     clearInterval(creatingTimer);creatingTimer=null;
     document.getElementById("aiCreatingOverlay")?.remove();
+    document.querySelector(".ai-design-panel")?.classList.remove("is-ai-loading");
   }
+
 
   function clone(v){try{return JSON.parse(JSON.stringify(v))}catch(e){return v}}
   function clamp(v,a,b){v=Number(v);return Number.isFinite(v)?Math.max(a,Math.min(b,v)):a}
@@ -7236,30 +7273,94 @@ document.addEventListener("DOMContentLoaded", function(){
   }
   function paintAll(){paintMain();paintThumbs()}
 
+  function unwrapAiResponse(value){
+    let v=value;
+    // n8n can return an object, [object], or a JSON string depending on the
+    // Respond to Webhook configuration. Accept all three safely.
+    for(let guard=0;guard<5;guard++){
+      if(typeof v==="string"){
+        const t=v.trim();
+        if(!t) throw new Error("n8n returned an empty response");
+        try{v=JSON.parse(t);continue}catch(e){break}
+      }
+      if(Array.isArray(v) && v.length===1){v=v[0];continue}
+      if(v && typeof v==="object" && !Array.isArray(v)){
+        if(Array.isArray(v.designs)) return v;
+        if(v.body!==undefined){v=v.body;continue}
+        if(v.data!==undefined && !Array.isArray(v.data?.designs)){v=v.data;continue}
+        if(v.json!==undefined){v=v.json;continue}
+      }
+      break;
+    }
+    return v;
+  }
+
+  async function readAiResponse(res){
+    const raw=await res.text();
+    if(!raw.trim()) throw new Error("n8n finished without a response body");
+    let parsed;
+    try{parsed=JSON.parse(raw)}catch(e){
+      throw new Error("n8n response is not valid JSON: "+raw.slice(0,160));
+    }
+    return unwrapAiResponse(parsed);
+  }
+
+  function renderReturnedDesigns(result,requestFingerprint){
+    if(!result || result.success!==true || !Array.isArray(result.designs) || result.designs.length<4){
+      throw new Error("AI response invalid: expected success=true and 4 designs");
+    }
+    const fresh=result.designs.slice(0,4).map((d,i)=>normalize(d,i));
+    if(fresh.some(d=>!d.artBackground)){
+      throw new Error("AI response missing final card artwork");
+    }
+    designs=fresh;
+    active=0;
+    generated=true;
+    generatedFingerprint=requestFingerprint;
+    paintAll();
+    // Repaint once after layout settles. This also wins over any legacy
+    // renderer that may have run earlier during page initialization.
+    requestAnimationFrame(()=>requestAnimationFrame(()=>paintAll()));
+  }
+
   async function generate(){
     if(busy)return;
     busy=true;
+    // A new run is a new result set. Never keep stale generated state visible.
+    generated=false;
+    generatedFingerprint="";
+    designs=[];
+    active=0;
     showAiCreating();
     const requestFingerprint=designFingerprint();
     const btn=document.getElementById("aiRegenerateBtn");
     const old=btn?.textContent||"สร้างใหม่";
     if(btn){btn.disabled=true;btn.textContent="✦ AI กำลังดูงานและออกแบบ..."}
     try{
-      const res=await fetch(WEBHOOK_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(await payload())});
-      if(!res.ok)throw new Error("HTTP "+res.status);
-      const result=await res.json();
-      if(result?.success!==true||!Array.isArray(result.designs)||result.designs.length!==4)throw new Error("AI response invalid");
-      designs=result.designs.slice(0,4).map((d,i)=>normalize(d,i));
-      active=0;generated=true;generatedFingerprint=requestFingerprint;paintAll();
-      if(typeof showToast==="function")showToast("V14: Seedream ออกแบบใหม่ทั้งใบ + สร้าง Mockup สมจริง 4 แบบ");
+      const res=await fetch(WEBHOOK_URL,{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Accept":"application/json"},
+        cache:"no-store",
+        body:JSON.stringify(await payload())
+      });
+      if(!res.ok)throw new Error("HTTP "+res.status+" "+res.statusText);
+      const result=await readAiResponse(res);
+      renderReturnedDesigns(result,requestFingerprint);
+      if(typeof showToast==="function")showToast("สร้าง Design ใหม่ 4 แบบเสร็จแล้ว");
     }catch(e){
-      console.error(e);
-      if(typeof showToast==="function")showToast("AI V3 ยังไม่พร้อม ตรวจ Workflow V3 และ Credential");
-      else alert("AI V3 ยังไม่พร้อม ตรวจ Workflow V3 และ Credential");
+      console.error("NAMI V48 generate failed",e);
+      clearAiResultSurface();
+      const name=document.getElementById("aiOptionName");
+      if(name)name.textContent="สร้างดีไซน์ไม่สำเร็จ — กดสร้างใหม่อีกครั้ง";
+      if(typeof showToast==="function")showToast("ยังไม่ได้รับ Design รอบใหม่จาก n8n: "+(e?.message||e));
+      else alert("ยังไม่ได้รับ Design รอบใหม่จาก n8n\n"+(e?.message||e));
     }finally{
-      hideAiCreating();busy=false;if(btn){btn.disabled=false;btn.textContent=old}
+      hideAiCreating();
+      busy=false;
+      if(btn){btn.disabled=false;btn.textContent=old}
     }
   }
+
 
   function pct(v,total){return Math.round(clamp(v,0,100)/100*total)}
   function toEditor(d,side){

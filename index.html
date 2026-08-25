@@ -6575,6 +6575,9 @@ document.addEventListener("DOMContentLoaded", function(){
 <script id="nami-ai-v3-script">
 (function(){
   const WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v14";
+  const RESULT_WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v14-result";
+  const AI_POLL_INTERVAL_MS=5000;
+  const AI_MAX_WAIT_MS=12*60*1000;
   let designs=[];
   let active=0;
   let busy=false;
@@ -7323,6 +7326,48 @@ document.addEventListener("DOMContentLoaded", function(){
     requestAnimationFrame(()=>requestAnimationFrame(()=>paintAll()));
   }
 
+  function makeAiJobId(){
+    try{if(globalThis.crypto?.randomUUID)return globalThis.crypto.randomUUID()}catch(e){}
+    return "job-"+Date.now()+"-"+Math.random().toString(36).slice(2,10);
+  }
+
+  function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
+
+  async function pollAiResult(jobId,requestFingerprint){
+    const started=Date.now();
+    let lastMessage="กำลังรอ n8n สร้าง Design";
+    while(Date.now()-started<AI_MAX_WAIT_MS){
+      try{
+        const url=RESULT_WEBHOOK_URL+"?jobId="+encodeURIComponent(jobId)+"&_="+Date.now();
+        const res=await fetch(url,{method:"GET",headers:{"Accept":"application/json"},cache:"no-store"});
+        if(res.ok){
+          const raw=await res.text();
+          if(raw.trim()){
+            let result;
+            try{result=unwrapAiResponse(JSON.parse(raw))}catch(e){result=null}
+            if(result){
+              if(result.success===true && Array.isArray(result.designs) && result.designs.length>=4){
+                renderReturnedDesigns(result,requestFingerprint);
+                return result;
+              }
+              const status=String(result.status||"").toLowerCase();
+              if(status==="error" || result.success===false){
+                throw new Error(result.error||result.message||"n8n job failed");
+              }
+              if(result.message)lastMessage=String(result.message);
+            }
+          }
+        }
+      }catch(e){
+        // A temporary polling/network error must NOT close the loading screen.
+        console.warn("NAMI V49 poll retry",e);
+        lastMessage=e?.message||lastMessage;
+      }
+      await sleep(AI_POLL_INTERVAL_MS);
+    }
+    throw new Error("รอผลจาก n8n เกิน 12 นาที: "+lastMessage);
+  }
+
   async function generate(){
     if(busy)return;
     busy=true;
@@ -7333,28 +7378,57 @@ document.addEventListener("DOMContentLoaded", function(){
     active=0;
     showAiCreating();
     const requestFingerprint=designFingerprint();
+    const jobId=makeAiJobId();
     const btn=document.getElementById("aiRegenerateBtn");
     const old=btn?.textContent||"สร้างใหม่";
     if(btn){btn.disabled=true;btn.textContent="✦ AI กำลังดูงานและออกแบบ..."}
+
     try{
-      const res=await fetch(WEBHOOK_URL,{
-        method:"POST",
-        headers:{"Content-Type":"application/json","Accept":"application/json"},
-        cache:"no-store",
-        body:JSON.stringify(await payload())
-      });
-      if(!res.ok)throw new Error("HTTP "+res.status+" "+res.statusText);
-      const result=await readAiResponse(res);
-      renderReturnedDesigns(result,requestFingerprint);
+      const requestBody=await payload();
+      requestBody.jobId=jobId;
+      requestBody.clientJobId=jobId;
+
+      let immediateResult=null;
+      try{
+        const res=await fetch(WEBHOOK_URL,{
+          method:"POST",
+          headers:{"Content-Type":"application/json","Accept":"application/json"},
+          cache:"no-store",
+          body:JSON.stringify(requestBody)
+        });
+
+        if(res.ok){
+          const raw=await res.text();
+          if(raw.trim()){
+            try{immediateResult=unwrapAiResponse(JSON.parse(raw))}catch(e){
+              console.warn("NAMI V49 start response was not final JSON; switching to polling",e);
+            }
+          }
+        }else{
+          console.warn("NAMI V49 start HTTP",res.status,"— keep waiting via result polling");
+        }
+      }catch(e){
+        // Reverse proxies often close a long webhook request while n8n keeps running.
+        // Keep the loading UI alive and recover the result using the client-generated jobId.
+        console.warn("NAMI V49 start request disconnected; continue polling",e);
+      }
+
+      if(immediateResult?.success===true && Array.isArray(immediateResult.designs) && immediateResult.designs.length>=4){
+        renderReturnedDesigns(immediateResult,requestFingerprint);
+      }else{
+        await pollAiResult(jobId,requestFingerprint);
+      }
+
       if(typeof showToast==="function")showToast("สร้าง Design ใหม่ 4 แบบเสร็จแล้ว");
     }catch(e){
-      console.error("NAMI V48 generate failed",e);
+      console.error("NAMI V49 generate failed",e);
       clearAiResultSurface();
       const name=document.getElementById("aiOptionName");
       if(name)name.textContent="สร้างดีไซน์ไม่สำเร็จ — กดสร้างใหม่อีกครั้ง";
       if(typeof showToast==="function")showToast("ยังไม่ได้รับ Design รอบใหม่จาก n8n: "+(e?.message||e));
       else alert("ยังไม่ได้รับ Design รอบใหม่จาก n8n\n"+(e?.message||e));
     }finally{
+      // Loading is closed ONLY after a final result or a real terminal failure.
       hideAiCreating();
       busy=false;
       if(btn){btn.disabled=false;btn.textContent=old}

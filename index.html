@@ -6564,10 +6564,10 @@ document.addEventListener("DOMContentLoaded", function(){
   }
 </style>
 
-<script id="nami-ai-v3-script">
+<script id="nami-ai-v3-script" data-build="V60-MAC-MASTER">
 (function(){
-  const WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v59";
-  const RESULT_WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v59-result";
+  const WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v60";
+  const RESULT_WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v60-result";
   let designs=[];
   let active=0;
   let busy=false;
@@ -7002,8 +7002,6 @@ document.addEventListener("DOMContentLoaded", function(){
       .filter(v=>/^#[0-9a-f]{6}$/i.test(String(v||""))))]
       .slice(0,12);
 
-    console.log("[NAMI V57 payload assets]",{profile:!!s.profileSrc,logo:!!s.logoSrc,front:!!frontPreviewImage,back:!!backPreviewImage});
-
     return {
       source:"NAMI Business Card Studio",
       mode:"step2-image-first-v13",
@@ -7255,9 +7253,11 @@ document.addEventListener("DOMContentLoaded", function(){
 
   async function waitForAiResult(jobId){
     const started=Date.now();
-    const timeoutMs=8*60*1000;
+    const timeoutMs=12*60*1000;
     while(Date.now()-started < timeoutMs){
-      await new Promise(r=>setTimeout(r,3000));
+      await new Promise(r=>setTimeout(r,4000));
+      const status=document.getElementById("aiCreatingStatus");
+      if(status) status.textContent="AI กำลังสร้างงาน... รอผลจาก n8n";
       const url=RESULT_WEBHOOK_URL+"?jobId="+encodeURIComponent(jobId)+"&_="+Date.now();
       const res=await fetch(url,{method:"GET",cache:"no-store"});
       if(!res.ok) throw new Error("RESULT HTTP "+res.status);
@@ -7266,8 +7266,6 @@ document.addEventListener("DOMContentLoaded", function(){
       if(data?.status==="error" || data?.success===false){
         throw new Error(data?.error || "AI job failed");
       }
-      const status=document.getElementById("aiCreatingStatus");
-      if(status) status.textContent="AI กำลังสร้างงาน... รอผลจาก n8n";
     }
     throw new Error("AI generation timeout");
   }
@@ -7283,13 +7281,11 @@ document.addEventListener("DOMContentLoaded", function(){
     try{
       const res=await fetch(WEBHOOK_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(await payload())});
       if(!res.ok)throw new Error("HTTP "+res.status);
-      const startResult=await res.json();
-
-      let result=startResult;
-      if(startResult?.status==="pending" && startResult?.jobId){
-        result=await waitForAiResult(startResult.jobId);
+      const started=await res.json();
+      let result=started;
+      if(started?.status==="pending" && started?.jobId){
+        result=await waitForAiResult(started.jobId);
       }
-
       if(result?.success!==true||!Array.isArray(result.designs)||result.designs.length!==4)throw new Error("AI response invalid");
       designs=result.designs.slice(0,4).map((d,i)=>normalize(d,i));
       active=0;generated=true;generatedFingerprint=requestFingerprint;paintAll();

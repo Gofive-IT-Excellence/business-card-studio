@@ -7238,7 +7238,7 @@ document.addEventListener("DOMContentLoaded", function(){
     while(Date.now()-started < timeoutMs){
       await new Promise(r=>setTimeout(r,4000));
       const status=document.getElementById("aiCreatingStatus");
-      if(status) status.textContent="AI กำลังสร้างงาน... ตรวจสถานะ V62 ทุก 4 วินาที";
+      if(status) status.textContent="AI กำลังสร้างงาน....";
       const url=RESULT_WEBHOOK_URL+"?jobId="+encodeURIComponent(jobId)+"&_="+Date.now();
       const res=await fetch(url,{method:"GET",cache:"no-store"});
       if(!res.ok) throw new Error("RESULT HTTP "+res.status);
@@ -7287,7 +7287,7 @@ document.addEventListener("DOMContentLoaded", function(){
       designs=v62Designs;
       active=0;generated=true;generatedFingerprint=requestFingerprint;paintAll();
       console.log("V62 DESIGNS APPLIED",{engine:result.engine,jobId:started.jobId,count:designs.length});
-      if(typeof showToast==="function")showToast("V62 RESULT RECEIVED • ใช้ผล v62-strict-thai-fullbleed แล้ว");
+      if(typeof showToast==="function")showToast("AI สร้างงานเสร็จแล้ว");
     }catch(e){
       console.error(e);
       if(typeof showToast==="function")showToast("AI V3 ยังไม่พร้อม ตรวจ Workflow V3 และ Credential");

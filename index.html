@@ -6563,7 +6563,7 @@ document.addEventListener("DOMContentLoaded", function(){
   }
 </style>
 
-<script id="nami-ai-v3-script" data-build="V60-MAC-MASTER">
+<script id="nami-ai-v3-script" data-build="V61-STEP2-RASTER-DIRECT">
 (function(){
   const WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v60";
   const RESULT_WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v60-result";
@@ -6956,11 +6956,12 @@ document.addEventListener("DOMContentLoaded", function(){
   async function payload(){
     const s=getSource();
 
-    // V4 FIX1: freeze BOTH completed Step-2 sides as PNG before asking AI to redesign.
-    // Save the currently edited side first. If the back side has never been opened,
-    // initialize it through the editor's normal side-switch logic so V4 never sends
-    // an empty backPreviewImage to n8n.
+    // V61 SOURCE OF TRUTH:
+    // Freeze exactly what the user sees in Step 2 as two complete raster images.
+    // AI receives the FULL FRONT and FULL BACK cards, not reconstructed text/logo/photo parts.
     if(typeof saveActiveSide==="function") saveActiveSide({allowEmpty:true});
+
+    // Ensure BACK state exists before capture.
     if(!Array.isArray(sideStates?.back) || !sideStates.back.length){
       const originalSide=activeSide;
       if(typeof switchSide==="function") switchSide("back");
@@ -6971,25 +6972,12 @@ document.addEventListener("DOMContentLoaded", function(){
     const frontPreviewImage=await captureCardSidePng("front");
     const backPreviewImage=await captureCardSidePng("back");
 
-    // V13: the COMPLETE Step-2 PNGs are the only AI source of truth.
-    // Do not downsample/reconstruct them before sending to n8n.
-    const frontAiReferenceImage=frontPreviewImage;
-    const backAiReferenceImage=backPreviewImage;
-
-    // V7 source of truth: exact Step-2 geometry + one combined image
-    // so Cloudflare Vision can study FRONT and BACK in a single request.
-    const sourceGeometry={
-      front:v7GeometryForSide("front"),
-      back:v7GeometryForSide("back")
-    };
-    const referenceSheetImage=await v7MakeReferenceSheet(frontPreviewImage,backPreviewImage);
-
-    // Clean visual references for FLUX. These intentionally contain
-    // no portrait, logo, text, icons or customer-specific content.
-    const frontDesignReferenceImage=await captureDesignReferencePng("front");
-    const backDesignReferenceImage=await captureDesignReferencePng("back");
-    if(!frontPreviewImage) throw new Error("ไม่สามารถสร้างภาพด้านหน้าจาก Step 2 ได้");
-    if(!backPreviewImage) throw new Error("ไม่สามารถสร้างภาพด้านหลังจาก Step 2 ได้ กรุณาเปิดแท็บด้านหลัง 1 ครั้งแล้วลองใหม่");
+    if(!frontPreviewImage?.startsWith("data:image/")){
+      throw new Error("จับภาพนามบัตรด้านหน้าจาก Step 2 ไม่สำเร็จ");
+    }
+    if(!backPreviewImage?.startsWith("data:image/")){
+      throw new Error("จับภาพนามบัตรด้านหลังจาก Step 2 ไม่สำเร็จ");
+    }
 
     const snap=getSnap();
     const allSideElements=[
@@ -7001,11 +6989,14 @@ document.addEventListener("DOMContentLoaded", function(){
       .filter(v=>/^#[0-9a-f]{6}$/i.test(String(v||""))))]
       .slice(0,12);
 
-    return {
+    // Keep metadata for guidance only. The two raster images above are the layout/content truth.
+    const request={
       source:"NAMI Business Card Studio",
-      mode:"step2-image-first-v13",
+      mode:"step2-full-card-raster-v61",
       generationNonce:Date.now()+"-"+Math.random().toString(36).slice(2),
       cardSizeMm:{width:90,height:55},
+      primaryColor:document.getElementById("aiColorValue")?.textContent?.trim()||"#00BFB3",
+      palette:colors,
       fields:{
         name:s.name,
         role:s.role,
@@ -7014,32 +7005,20 @@ document.addEventListener("DOMContentLoaded", function(){
         extraText:s.extras
       },
       textContent:s.textContent,
-      palette:colors,
-      primaryColor:document.getElementById("aiColorValue")?.textContent?.trim()||"#00BFB3",
-      hasProfileImage:Boolean(s.profileSrc),
-      hasTransparentProfile:Boolean(s.profileSrc && /^data:image\/png/i.test(s.profileSrc)),
-      hasLogo:Boolean(s.logoSrc),
 
-      // These are the two completed source cards AI studies first.
+      // IMPORTANT: THESE TWO COMPLETE PNGs ARE WHAT n8n/AI MUST REDESIGN.
       frontPreviewImage,
       backPreviewImage,
-      frontAiReferenceImage,
-      backAiReferenceImage,
-      referenceSheetImage,
-      sourceGeometry,
-
-      // V6 compatibility fields (V7 does not use these as source of layout).
-      frontDesignReferenceImage,
-      backDesignReferenceImage,
-
-      // Keep real assets separate so final output always uses the originals.
-      profileImage:s.profileSrc,
-      logoImage:s.logoSrc,
-      originalProfileImage:s.profileSrc,
-      originalLogoImage:s.logoSrc,
-      profileSrc:s.profileSrc,
-      logoSrc:s.logoSrc
+      frontAiReferenceImage:frontPreviewImage,
+      backAiReferenceImage:backPreviewImage
     };
+
+    console.log("[NAMI V61] Step-2 raster payload ready",{
+      frontBytes:frontPreviewImage.length,
+      backBytes:backPreviewImage.length,
+      mode:request.mode
+    });
+    return request;
   }
 
   function box(b,fb={}){
@@ -7288,7 +7267,7 @@ document.addEventListener("DOMContentLoaded", function(){
       if(result?.success!==true||!Array.isArray(result.designs)||result.designs.length!==4)throw new Error("AI response invalid");
       designs=result.designs.slice(0,4).map((d,i)=>normalize(d,i));
       active=0;generated=true;generatedFingerprint=requestFingerprint;paintAll();
-      if(typeof showToast==="function")showToast("V14: Seedream ออกแบบใหม่ทั้งใบ + สร้าง Mockup สมจริง 4 แบบ");
+      if(typeof showToast==="function")showToast("V61: ใช้ภาพเต็มใบจาก Step 2 ออกแบบใหม่ 4 แบบ + Mockup");
     }catch(e){
       console.error(e);
       if(typeof showToast==="function")showToast("AI V3 ยังไม่พร้อม ตรวจ Workflow V3 และ Credential");

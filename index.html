@@ -6563,7 +6563,7 @@ document.addEventListener("DOMContentLoaded", function(){
   }
 </style>
 
-<script id="nami-ai-v3-script" data-build="V61-STEP2-RASTER-DIRECT">
+<script id="nami-ai-v3-script" data-build="V65-RESULT-DELIVERY-FIX">
 (function(){
   const WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v60";
   const RESULT_WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v60-result";
@@ -6588,7 +6588,7 @@ document.addEventListener("DOMContentLoaded", function(){
     overlay.innerHTML=`<div class="ai-creating-box">
       <div class="ai-creating-orb"></div>
       <h3>AI กำลังสร้าง Design...</h3>
-      <p class="ai-creating-status" id="aiCreatingStatus">กำลังวิเคราะห์นามบัตร รูป และโลโก้</p>
+      <p class="ai-creating-status" id="aiCreatingStatus">AI กำลังสร้างงาน....</p>
       <p class="ai-creating-note">ระบบกำลังสร้าง Art Direction 4 แบบ อาจใช้เวลาประมาณ 2–4 นาที</p>
       <div class="ai-creating-progress"><span></span></div>
       <div class="ai-creating-steps">
@@ -6599,13 +6599,10 @@ document.addEventListener("DOMContentLoaded", function(){
       </div>
     </div>`;
     panel.appendChild(overlay);
-    const messages=["กำลังบันทึกภาพนามบัตรด้านหน้าและด้านหลัง","AI กำลังวิเคราะห์งานต้นฉบับทั้ง 2 ด้าน","กำลังสร้าง Art Direction 4 แบบจากงานจริง","กำลังประกอบข้อมูลจริงและเตรียม Mockup"];
-    let index=0;
     clearInterval(creatingTimer);
     creatingTimer=setInterval(()=>{
-      index=Math.min(index+1,messages.length-1);
-      const status=document.getElementById("aiCreatingStatus");if(status)status.textContent=messages[index];
-      document.querySelectorAll(".ai-creating-step").forEach((el,i)=>el.classList.toggle("is-active",i<=index));
+      const status=document.getElementById("aiCreatingStatus");
+      if(status) status.textContent="AI กำลังสร้างงาน....";
     },26000);
   }
   function hideAiCreating(){
@@ -7233,28 +7230,56 @@ document.addEventListener("DOMContentLoaded", function(){
 
   async function waitForAiResult(jobId){
     console.log("V65 jobId:",jobId);
-    // V65: NO CLIENT-SIDE TIMEOUT. Keep waiting until this exact job finishes.
-    // Temporary network/HTTP errors do not reveal old designs; polling simply continues.
+
     while(true){
       await new Promise(r=>setTimeout(r,4000));
+
       const status=document.getElementById("aiCreatingStatus");
       if(status) status.textContent="AI กำลังสร้างงาน....";
+
       try{
         const url=RESULT_WEBHOOK_URL+"?jobId="+encodeURIComponent(jobId)+"&_="+Date.now();
         const res=await fetch(url,{method:"GET",cache:"no-store"});
+
         if(!res.ok){
           console.warn("V65 RESULT HTTP",res.status,"— retrying");
           continue;
         }
-        const data=await res.json();
+
+        // IMPORTANT: n8n/nginx can occasionally return an empty response.
+        // Never call response.json() directly because an empty body throws
+        // "Unexpected end of JSON input".
+        const raw=await res.text();
+        if(!raw || !raw.trim()){
+          console.warn("V65 RESULT EMPTY — retrying",jobId);
+          continue;
+        }
+
+        let data;
+        try{
+          data=JSON.parse(raw);
+        }catch(parseErr){
+          console.warn("V65 RESULT INVALID JSON — retrying",raw.slice(0,180));
+          continue;
+        }
+
         console.log("V65 STATUS:",data?.status,"engine:",data?.engine||"(missing)","jobId:",jobId);
-        if(data?.status==="done") return data;
+
+        if(data?.status==="done"){
+          if(!Array.isArray(data?.designs) || data.designs.length<4){
+            console.warn("V65 DONE but designs are incomplete — retrying");
+            continue;
+          }
+          return data;
+        }
+
         if(data?.status==="error" || data?.success===false){
-          throw new Error(data?.error || "AI job failed");
+          const err=new Error(data?.error || "AI_JOB_FAILED");
+          err.isWorkflowError=true;
+          throw err;
         }
       }catch(err){
-        // A real workflow error stops this job. Network/JSON errors keep polling.
-        if(String(err?.message||"").includes("AI job failed")) throw err;
+        if(err?.isWorkflowError) throw err;
         console.warn("V65 poll retry:",err);
       }
     }
@@ -7271,13 +7296,45 @@ document.addEventListener("DOMContentLoaded", function(){
     let jobId=resumeJobId;
     try{
       if(!jobId){
-        const res=await fetch(WEBHOOK_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(await payload())});
-        if(!res.ok)throw new Error("HTTP "+res.status);
-        const started=await res.json();
-        console.log("V65 START RESPONSE:",started);
-        if(!started?.jobId) throw new Error("V65 missing jobId");
-        jobId=started.jobId;
+        // Create the SAME jobId in the browser before calling n8n.
+        // V65 Create AI Job accepts body.jobId/clientJobId, so the browser
+        // always knows which result to poll even if Respond Start is empty.
+        jobId="job-"+Date.now()+"-"+Math.random().toString(36).slice(2,10);
         sessionStorage.setItem(V65_JOB_STORAGE_KEY,jobId);
+
+        const requestBody=await payload();
+        requestBody.jobId=jobId;
+        requestBody.clientJobId=jobId;
+
+        console.log("V65 START jobId:",jobId);
+
+        const res=await fetch(WEBHOOK_URL,{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(requestBody)
+        });
+
+        if(!res.ok){
+          throw new Error("V65 START HTTP "+res.status);
+        }
+
+        // Response body is optional. Do not depend on it.
+        const rawStart=await res.text();
+        if(rawStart?.trim()){
+          try{
+            const started=JSON.parse(rawStart);
+            console.log("V65 START RESPONSE:",started);
+            if(started?.jobId && String(started.jobId)!==String(jobId)){
+              console.warn("V65 server returned a different jobId; using server jobId",started.jobId);
+              jobId=String(started.jobId);
+              sessionStorage.setItem(V65_JOB_STORAGE_KEY,jobId);
+            }
+          }catch(e){
+            console.warn("V65 START non-JSON response ignored");
+          }
+        }else{
+          console.log("V65 START response empty — continuing with client jobId:",jobId);
+        }
       }
 
       // Only the DONE result belonging to this exact jobId may replace the UI.
@@ -7293,12 +7350,28 @@ document.addEventListener("DOMContentLoaded", function(){
       console.log("V65 DESIGNS APPLIED",{engine:result.engine,jobId,count:designs.length});
       if(typeof showToast==="function")showToast("AI สร้างงานเสร็จแล้ว");
     }catch(e){
-      console.error(e);
-      // IMPORTANT: keep the overlay covering old designs on failure.
+      console.error("V65 GENERATE ERROR:",e);
+
       const status=document.getElementById("aiCreatingStatus");
-      if(status) status.textContent="งาน AI หยุดจาก Workflow — กดสร้างใหม่เพื่อเริ่มงานใหม่";
-      sessionStorage.removeItem(V65_JOB_STORAGE_KEY);
-      if(typeof showToast==="function")showToast("Workflow AI หยุด กรุณากดสร้างใหม่");
+
+      if(e?.isWorkflowError){
+        // Only an explicit status:error from the result webhook is a real workflow failure.
+        if(status) status.textContent="AI สร้างงานไม่สำเร็จ กรุณากดสร้างใหม่";
+        sessionStorage.removeItem(V65_JOB_STORAGE_KEY);
+        if(typeof showToast==="function")showToast("AI สร้างงานไม่สำเร็จ");
+      }else{
+        // Network/start-response problems must NOT expose old designs or declare the workflow stopped.
+        if(status) status.textContent="AI กำลังสร้างงาน....";
+        if(typeof showToast==="function")showToast("กำลังเชื่อมต่อผล AI ใหม่อัตโนมัติ");
+
+        // If we already know the jobId, resume polling automatically.
+        if(jobId){
+          sessionStorage.setItem(V65_JOB_STORAGE_KEY,jobId);
+          busy=false;
+          setTimeout(()=>generate(jobId),4000);
+          return;
+        }
+      }
     }finally{
       busy=false;if(btn){btn.disabled=false;btn.textContent=old}
     }

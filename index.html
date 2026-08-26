@@ -7229,37 +7229,38 @@ document.addEventListener("DOMContentLoaded", function(){
   }
   function paintAll(){paintMain();paintThumbs()}
 
-  const V62_REQUIRED_ENGINE="v62-strict-thai-fullbleed";
+  const V65_JOB_STORAGE_KEY="nami_business_card_v65_job";
 
   async function waitForAiResult(jobId){
-    console.log("V62 jobId:",jobId);
-    const started=Date.now();
-    const timeoutMs=12*60*1000;
-    while(Date.now()-started < timeoutMs){
+    console.log("V65 jobId:",jobId);
+    // V65: NO CLIENT-SIDE TIMEOUT. Keep waiting until this exact job finishes.
+    // Temporary network/HTTP errors do not reveal old designs; polling simply continues.
+    while(true){
       await new Promise(r=>setTimeout(r,4000));
       const status=document.getElementById("aiCreatingStatus");
       if(status) status.textContent="AI กำลังสร้างงาน....";
-      const url=RESULT_WEBHOOK_URL+"?jobId="+encodeURIComponent(jobId)+"&_="+Date.now();
-      const res=await fetch(url,{method:"GET",cache:"no-store"});
-      if(!res.ok) throw new Error("RESULT HTTP "+res.status);
-      const data=await res.json();
-      console.log("V62 STATUS:",data?.status,"engine:",data?.engine||"(missing)","jobId:",jobId);
-      if(data?.status==="done"){
-        console.log("V62 RESULT RECEIVED",data);
-        if(data?.engine!==V62_REQUIRED_ENGINE){
-          console.error("V62 ENGINE REJECTED. Expected:",V62_REQUIRED_ENGINE,"Received:",data?.engine);
-          throw new Error("V62 engine mismatch: "+String(data?.engine||"missing"));
+      try{
+        const url=RESULT_WEBHOOK_URL+"?jobId="+encodeURIComponent(jobId)+"&_="+Date.now();
+        const res=await fetch(url,{method:"GET",cache:"no-store"});
+        if(!res.ok){
+          console.warn("V65 RESULT HTTP",res.status,"— retrying");
+          continue;
         }
-        return data;
-      }
-      if(data?.status==="error" || data?.success===false){
-        throw new Error(data?.error || "AI job failed");
+        const data=await res.json();
+        console.log("V65 STATUS:",data?.status,"engine:",data?.engine||"(missing)","jobId:",jobId);
+        if(data?.status==="done") return data;
+        if(data?.status==="error" || data?.success===false){
+          throw new Error(data?.error || "AI job failed");
+        }
+      }catch(err){
+        // A real workflow error stops this job. Network/JSON errors keep polling.
+        if(String(err?.message||"").includes("AI job failed")) throw err;
+        console.warn("V65 poll retry:",err);
       }
     }
-    throw new Error("AI generation timeout");
   }
 
-  async function generate(){
+  async function generate(resumeJobId=""){
     if(busy)return;
     busy=true;
     showAiCreating();
@@ -7267,35 +7268,48 @@ document.addEventListener("DOMContentLoaded", function(){
     const btn=document.getElementById("aiRegenerateBtn");
     const old=btn?.textContent||"สร้างใหม่";
     if(btn){btn.disabled=true;btn.textContent="✦ AI กำลังดูงานและออกแบบ..."}
+    let jobId=resumeJobId;
     try{
-      const res=await fetch(WEBHOOK_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(await payload())});
-      if(!res.ok)throw new Error("HTTP "+res.status);
-      const started=await res.json();
-      console.log("V62 START RESPONSE:",started);
-      if(!started?.jobId) throw new Error("V62 missing jobId");
-      console.log("V62 jobId:",started.jobId);
+      if(!jobId){
+        const res=await fetch(WEBHOOK_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(await payload())});
+        if(!res.ok)throw new Error("HTTP "+res.status);
+        const started=await res.json();
+        console.log("V65 START RESPONSE:",started);
+        if(!started?.jobId) throw new Error("V65 missing jobId");
+        jobId=started.jobId;
+        sessionStorage.setItem(V65_JOB_STORAGE_KEY,jobId);
+      }
 
-      // STRICT V62: never accept an immediate/legacy design payload.
-      // Only the polled DONE result with the exact V62 engine may replace the current UI.
-      const result=await waitForAiResult(started.jobId);
-      if(result?.status!=="done") throw new Error("V62 result is not done");
-      if(result?.engine!==V62_REQUIRED_ENGINE) throw new Error("V62 engine mismatch");
-      if(result?.success!==true||!Array.isArray(result.designs)||result.designs.length!==4)throw new Error("V62 response invalid");
+      // Only the DONE result belonging to this exact jobId may replace the UI.
+      const result=await waitForAiResult(jobId);
+      if(result?.status!=="done") throw new Error("V65 result is not done");
+      if(result?.success!==true||!Array.isArray(result.designs)||result.designs.length!==4)throw new Error("V65 response invalid");
 
-      const v62Designs=result.designs.slice(0,4).map((d,i)=>normalize(d,i));
-      // Commit only after every strict check passes. Until here Modern Clean/current UI stays untouched.
-      designs=v62Designs;
+      const v65Designs=result.designs.slice(0,4).map((d,i)=>normalize(d,i));
+      designs=v65Designs;
       active=0;generated=true;generatedFingerprint=requestFingerprint;paintAll();
-      console.log("V62 DESIGNS APPLIED",{engine:result.engine,jobId:started.jobId,count:designs.length});
+      sessionStorage.removeItem(V65_JOB_STORAGE_KEY);
+      hideAiCreating();
+      console.log("V65 DESIGNS APPLIED",{engine:result.engine,jobId,count:designs.length});
       if(typeof showToast==="function")showToast("AI สร้างงานเสร็จแล้ว");
     }catch(e){
       console.error(e);
-      if(typeof showToast==="function")showToast("AI V3 ยังไม่พร้อม ตรวจ Workflow V3 และ Credential");
-      else alert("AI V3 ยังไม่พร้อม ตรวจ Workflow V3 และ Credential");
+      // IMPORTANT: keep the overlay covering old designs on failure.
+      const status=document.getElementById("aiCreatingStatus");
+      if(status) status.textContent="งาน AI หยุดจาก Workflow — กดสร้างใหม่เพื่อเริ่มงานใหม่";
+      sessionStorage.removeItem(V65_JOB_STORAGE_KEY);
+      if(typeof showToast==="function")showToast("Workflow AI หยุด กรุณากดสร้างใหม่");
     }finally{
-      hideAiCreating();busy=false;if(btn){btn.disabled=false;btn.textContent=old}
+      busy=false;if(btn){btn.disabled=false;btn.textContent=old}
     }
   }
+
+  // If the page is refreshed while V65 is still running, resume the same job
+  // and keep the loading screen instead of exposing the old placeholder designs.
+  window.addEventListener("load",()=>{
+    const pendingJob=sessionStorage.getItem(V65_JOB_STORAGE_KEY);
+    if(pendingJob) setTimeout(()=>generate(pendingJob),150);
+  });
 
   function pct(v,total){return Math.round(clamp(v,0,100)/100*total)}
   function toEditor(d,side){

@@ -4102,7 +4102,6 @@ document.addEventListener("DOMContentLoaded", function(){
               <p>เลือกแบบที่คุณชอบ แล้วปรับแต่งต่อใน Editor ได้เลย</p>
             </div>
             <div class="ai-design-actions">
-              <button class="ai-action-btn" id="aiSavedDesignsBtn" type="button">♥ แบบที่บันทึกไว้</button>
               <button class="ai-action-btn" id="aiRegenerateBtn" type="button">⟳ สร้างใหม่</button>
               <button class="ai-heart-btn" id="aiFavoriteBtn" type="button" aria-label="บันทึกแบบที่ชอบ">♡</button>
             </div>
@@ -4135,7 +4134,7 @@ document.addEventListener("DOMContentLoaded", function(){
             <button class="ai-preview-btn" id="aiLargePreviewBtn" type="button">⌕ ดูภาพใหญ่ (คลิกที่ภาพ)</button>
             <div>
               <button class="ai-use-btn" id="aiUseDesignBtn" type="button">✓ ใช้แบบนี้</button>
-              <button class="ai-heart-btn" id="aiFavoriteBtnSecondary" type="button" aria-label="บันทึกแบบที่ชอบ">♡</button>
+              <button class="ai-heart-btn" type="button" aria-label="บันทึกแบบที่ชอบ">♡</button>
             </div>
           </div>
           <div class="ai-thumbs" id="aiThumbs" aria-label="AI design options"></div>
@@ -6588,7 +6587,7 @@ document.addEventListener("DOMContentLoaded", function(){
     overlay.id="aiCreatingOverlay";overlay.className="ai-creating-overlay";
     overlay.innerHTML=`<div class="ai-creating-box">
       <div class="ai-creating-orb"></div>
-      <h3>AI กำลังสร้างงาน...</h3>
+      <h3>AI กำลังสร้าง Design...</h3>
       <p class="ai-creating-status" id="aiCreatingStatus">กำลังวิเคราะห์นามบัตร รูป และโลโก้</p>
       <p class="ai-creating-note">ระบบกำลังสร้าง Art Direction 4 แบบ อาจใช้เวลาประมาณ 2–4 นาที</p>
       <div class="ai-creating-progress"><span></span></div>
@@ -7230,18 +7229,29 @@ document.addEventListener("DOMContentLoaded", function(){
   }
   function paintAll(){paintMain();paintThumbs()}
 
+  const V62_REQUIRED_ENGINE="v62-strict-thai-fullbleed";
+
   async function waitForAiResult(jobId){
+    console.log("V62 jobId:",jobId);
     const started=Date.now();
     const timeoutMs=12*60*1000;
     while(Date.now()-started < timeoutMs){
       await new Promise(r=>setTimeout(r,4000));
       const status=document.getElementById("aiCreatingStatus");
-      if(status) status.textContent="AI กำลังสร้างงาน...";
+      if(status) status.textContent="AI กำลังสร้างงาน... ตรวจสถานะ V62 ทุก 4 วินาที";
       const url=RESULT_WEBHOOK_URL+"?jobId="+encodeURIComponent(jobId)+"&_="+Date.now();
       const res=await fetch(url,{method:"GET",cache:"no-store"});
       if(!res.ok) throw new Error("RESULT HTTP "+res.status);
       const data=await res.json();
-      if(data?.status==="done") return data;
+      console.log("V62 STATUS:",data?.status,"engine:",data?.engine||"(missing)","jobId:",jobId);
+      if(data?.status==="done"){
+        console.log("V62 RESULT RECEIVED",data);
+        if(data?.engine!==V62_REQUIRED_ENGINE){
+          console.error("V62 ENGINE REJECTED. Expected:",V62_REQUIRED_ENGINE,"Received:",data?.engine);
+          throw new Error("V62 engine mismatch: "+String(data?.engine||"missing"));
+        }
+        return data;
+      }
       if(data?.status==="error" || data?.success===false){
         throw new Error(data?.error || "AI job failed");
       }
@@ -7261,14 +7271,23 @@ document.addEventListener("DOMContentLoaded", function(){
       const res=await fetch(WEBHOOK_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(await payload())});
       if(!res.ok)throw new Error("HTTP "+res.status);
       const started=await res.json();
-      let result=started;
-      if(started?.status==="pending" && started?.jobId){
-        result=await waitForAiResult(started.jobId);
-      }
-      if(result?.success!==true||!Array.isArray(result.designs)||result.designs.length!==4)throw new Error("AI response invalid");
-      designs=result.designs.slice(0,4).map((d,i)=>normalize(d,i));
+      console.log("V62 START RESPONSE:",started);
+      if(!started?.jobId) throw new Error("V62 missing jobId");
+      console.log("V62 jobId:",started.jobId);
+
+      // STRICT V62: never accept an immediate/legacy design payload.
+      // Only the polled DONE result with the exact V62 engine may replace the current UI.
+      const result=await waitForAiResult(started.jobId);
+      if(result?.status!=="done") throw new Error("V62 result is not done");
+      if(result?.engine!==V62_REQUIRED_ENGINE) throw new Error("V62 engine mismatch");
+      if(result?.success!==true||!Array.isArray(result.designs)||result.designs.length!==4)throw new Error("V62 response invalid");
+
+      const v62Designs=result.designs.slice(0,4).map((d,i)=>normalize(d,i));
+      // Commit only after every strict check passes. Until here Modern Clean/current UI stays untouched.
+      designs=v62Designs;
       active=0;generated=true;generatedFingerprint=requestFingerprint;paintAll();
-      if(typeof showToast==="function")showToast("V61: ใช้ภาพเต็มใบจาก Step 2 ออกแบบใหม่ 4 แบบ + Mockup");
+      console.log("V62 DESIGNS APPLIED",{engine:result.engine,jobId:started.jobId,count:designs.length});
+      if(typeof showToast==="function")showToast("V62 RESULT RECEIVED • ใช้ผล v62-strict-thai-fullbleed แล้ว");
     }catch(e){
       console.error(e);
       if(typeof showToast==="function")showToast("AI V3 ยังไม่พร้อม ตรวจ Workflow V3 และ Credential");
@@ -7324,26 +7343,7 @@ document.addEventListener("DOMContentLoaded", function(){
     },120);
   },true);
 
-  window.NAMI_AI_V3={
-    generate,
-    useSelected,
-    get designs(){return designs},
-    get active(){return active},
-    setActive(i){
-      if(!designs.length)return;
-      active=Math.max(0,Math.min(designs.length-1,Number(i)||0));
-      paintAll();
-    },
-    loadFavorite(d){
-      if(!d)return;
-      const restored=normalize(clone(d),0);
-      designs=[restored,...designs.filter(x=>x?.id!==restored?.id)].slice(0,4);
-      active=0;
-      generated=true;
-      paintAll();
-      if(typeof showToast==="function")showToast("เปิด Design ที่บันทึกไว้แล้ว — หน้าและหลังมาคู่กัน");
-    }
-  };
+  window.NAMI_AI_V3={generate,useSelected,get designs(){return designs}};
 })();
 </script>
 <!-- NAMI AI DESIGN V3 END -->
@@ -7592,224 +7592,6 @@ document.addEventListener("DOMContentLoaded", function(){
 })();
 </script>
 <!-- MAMI FLOATING CHATBOT END -->
-
-
-<!-- NAMI V62 FAVORITES: FRONT+BACK+MOCKUP BUNDLE BEGIN -->
-<style id="nami-v62-favorites-style">
-  .nami-fav-modal{position:fixed;inset:0;z-index:999999;background:rgba(15,23,42,.48);display:none;align-items:center;justify-content:center;padding:24px}
-  .nami-fav-modal.open{display:flex}
-  .nami-fav-dialog{width:min(1100px,96vw);max-height:90vh;overflow:auto;background:#fff;border-radius:24px;box-shadow:0 28px 90px rgba(15,23,42,.22);padding:24px}
-  .nami-fav-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
-  .nami-fav-head h2{margin:0 0 5px;font-size:24px;color:#172033}
-  .nami-fav-head p{margin:0;color:#7c8798}
-  .nami-fav-close{border:0;background:#f5f7f9;border-radius:50%;width:42px;height:42px;font-size:26px;cursor:pointer}
-  .nami-fav-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
-  .nami-fav-item{border:1px solid #e6eaef;border-radius:18px;padding:14px;background:#fff}
-  .nami-fav-item h3{font-size:17px;margin:0 0 10px;color:#1e293b}
-  .nami-fav-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .nami-fav-pair img{width:100%;aspect-ratio:1.75/1;object-fit:cover;border-radius:8px;border:1px solid #edf0f3;background:#f8fafc}
-  .nami-fav-mockup{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px;margin-top:8px;background:#f6f7f8}
-  .nami-fav-actions{display:flex;gap:8px;margin-top:10px}
-  .nami-fav-actions button{flex:1;border:0;border-radius:10px;padding:10px 12px;font-weight:700;cursor:pointer}
-  .nami-fav-open{background:#0bbdb3;color:white}
-  .nami-fav-delete{background:#f3f4f6;color:#475569}
-  .nami-fav-empty{text-align:center;color:#8a94a3;padding:48px 12px}
-</style>
-
-<div id="namiFavModal" class="nami-fav-modal" aria-hidden="true">
-  <div class="nami-fav-dialog" role="dialog" aria-modal="true">
-    <div class="nami-fav-head">
-      <div>
-        <h2>♥ Design ที่บันทึกไว้</h2>
-        <p>บันทึกเป็นชุดเดียวเสมอ: ด้านหน้า + ด้านหลัง + Mockup</p>
-      </div>
-      <button id="namiFavClose" class="nami-fav-close" type="button">×</button>
-    </div>
-    <div id="namiFavGrid" class="nami-fav-grid"></div>
-  </div>
-</div>
-
-<script id="nami-v62-favorites-script">
-(function(){
-  const DB_NAME="NAMI_BusinessCard_DB";
-  const STORE="favorites";
-  const DB_VERSION=1;
-  let dbPromise=null;
-
-  function openDB(){
-    if(dbPromise)return dbPromise;
-    dbPromise=new Promise((resolve,reject)=>{
-      const req=indexedDB.open(DB_NAME,DB_VERSION);
-      req.onupgradeneeded=()=>{
-        const db=req.result;
-        if(!db.objectStoreNames.contains(STORE)){
-          const st=db.createObjectStore(STORE,{keyPath:"id"});
-          st.createIndex("savedAt","savedAt");
-        }
-      };
-      req.onsuccess=()=>resolve(req.result);
-      req.onerror=()=>reject(req.error);
-    });
-    return dbPromise;
-  }
-  async function allFavs(){
-    const db=await openDB();
-    return new Promise((resolve,reject)=>{
-      const tx=db.transaction(STORE,"readonly");
-      const req=tx.objectStore(STORE).getAll();
-      req.onsuccess=()=>resolve((req.result||[]).sort((a,b)=>(b.savedAt||0)-(a.savedAt||0)));
-      req.onerror=()=>reject(req.error);
-    });
-  }
-  async function getFav(id){
-    const db=await openDB();
-    return new Promise((resolve,reject)=>{
-      const req=db.transaction(STORE,"readonly").objectStore(STORE).get(id);
-      req.onsuccess=()=>resolve(req.result||null);
-      req.onerror=()=>reject(req.error);
-    });
-  }
-  async function putFav(rec){
-    const db=await openDB();
-    return new Promise((resolve,reject)=>{
-      const tx=db.transaction(STORE,"readwrite");
-      tx.objectStore(STORE).put(rec);
-      tx.oncomplete=()=>resolve(true);
-      tx.onerror=()=>reject(tx.error);
-    });
-  }
-  async function delFav(id){
-    const db=await openDB();
-    return new Promise((resolve,reject)=>{
-      const tx=db.transaction(STORE,"readwrite");
-      tx.objectStore(STORE).delete(id);
-      tx.oncomplete=()=>resolve(true);
-      tx.onerror=()=>reject(tx.error);
-    });
-  }
-
-  function activeBundle(){
-    const api=window.NAMI_AI_V3;
-    const arr=api?.designs||[];
-    let idx=Number(api?.active);
-    if(!Number.isFinite(idx)){
-      const thumbs=[...document.querySelectorAll("#aiThumbs .ai-thumb")];
-      idx=Math.max(0,thumbs.findIndex(x=>x.classList.contains("is-active")));
-    }
-    const d=arr[idx]||arr[0];
-    if(!d)return null;
-    // Critical rule: one favorite is always a complete bundle.
-    if(!d.artBackground || !d.artBackgroundBack){
-      throw new Error("Design นี้ไม่มีด้านหน้าหรือด้านหลังครบ จึงไม่บันทึก");
-    }
-    const stableId=String(d.id||("fav-"+Date.now()));
-    return {
-      id:stableId,
-      name:d.name||"Saved Design",
-      savedAt:Date.now(),
-      artBackground:d.artBackground,
-      artBackgroundBack:d.artBackgroundBack,
-      mockupImage:d.mockupImage||"",
-      design:JSON.parse(JSON.stringify(d))
-    };
-  }
-
-  async function syncHearts(){
-    try{
-      const d=activeBundle();
-      const exists=d ? !!(await getFav(d.id)) : false;
-      ["aiFavoriteBtn","aiFavoriteBtnSecondary"].forEach(id=>{
-        const b=document.getElementById(id);
-        if(b)b.textContent=exists?"♥":"♡";
-      });
-    }catch(e){}
-  }
-
-  async function toggleFavorite(ev){
-    ev?.preventDefault?.();
-    ev?.stopPropagation?.();
-    ev?.stopImmediatePropagation?.();
-    try{
-      const rec=activeBundle();
-      if(!rec){ if(window.showToast)showToast("ยังไม่มี Design ให้บันทึก"); return; }
-      const existing=await getFav(rec.id);
-      if(existing){
-        await delFav(rec.id);
-        if(window.showToast)showToast("นำ Design ออกจากรายการที่บันทึกแล้ว");
-      }else{
-        await putFav(rec);
-        if(window.showToast)showToast("บันทึกครบทั้งด้านหน้า + ด้านหลัง + Mockup แล้ว");
-      }
-      await syncHearts();
-    }catch(err){
-      console.error("Favorite error",err);
-      if(window.showToast)showToast(err.message||"บันทึก Design ไม่สำเร็จ");
-    }
-  }
-
-  function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
-  async function renderSaved(){
-    const grid=document.getElementById("namiFavGrid");
-    if(!grid)return;
-    const rows=await allFavs();
-    if(!rows.length){
-      grid.innerHTML='<div class="nami-fav-empty">ยังไม่มี Design ที่บันทึกไว้<br><small>กด ♡ ที่แบบที่ชอบได้เลย</small></div>';
-      return;
-    }
-    grid.innerHTML=rows.map(r=>`
-      <article class="nami-fav-item" data-id="${esc(r.id)}">
-        <h3>${esc(r.name)}</h3>
-        <div class="nami-fav-pair">
-          <img src="${r.artBackground}" alt="ด้านหน้า">
-          <img src="${r.artBackgroundBack}" alt="ด้านหลัง">
-        </div>
-        ${r.mockupImage?`<img class="nami-fav-mockup" src="${r.mockupImage}" alt="Mockup">`:""}
-        <div class="nami-fav-actions">
-          <button class="nami-fav-open" type="button">เปิด Design นี้</button>
-          <button class="nami-fav-delete" type="button">ลบ</button>
-        </div>
-      </article>`).join("");
-  }
-
-  async function openModal(){
-    await renderSaved();
-    const m=document.getElementById("namiFavModal");
-    m?.classList.add("open");m?.setAttribute("aria-hidden","false");
-  }
-  function closeModal(){
-    const m=document.getElementById("namiFavModal");
-    m?.classList.remove("open");m?.setAttribute("aria-hidden","true");
-  }
-
-  document.addEventListener("click",async e=>{
-    const heart=e.target.closest("#aiFavoriteBtn,#aiFavoriteBtnSecondary");
-    if(heart){ await toggleFavorite(e); return; }
-    if(e.target.closest("#aiSavedDesignsBtn")){e.preventDefault();await openModal();return}
-    if(e.target.closest("#namiFavClose") || e.target===document.getElementById("namiFavModal")){closeModal();return}
-    const item=e.target.closest(".nami-fav-item");
-    if(item && e.target.closest(".nami-fav-delete")){
-      await delFav(item.dataset.id);await renderSaved();await syncHearts();return;
-    }
-    if(item && e.target.closest(".nami-fav-open")){
-      const rec=await getFav(item.dataset.id);
-      if(rec?.design && window.NAMI_AI_V3?.loadFavorite){
-        window.NAMI_AI_V3.loadFavorite(rec.design);
-        closeModal();
-        await syncHearts();
-      }
-    }
-  },true);
-
-  // Keep hearts synchronized when thumbnails/designs change.
-  const obs=new MutationObserver(()=>setTimeout(syncHearts,30));
-  window.addEventListener("load",()=>{
-    const thumbs=document.getElementById("aiThumbs");
-    if(thumbs)obs.observe(thumbs,{subtree:true,childList:true,attributes:true,attributeFilter:["class"]});
-    setTimeout(syncHearts,500);
-  });
-})();
-</script>
-<!-- NAMI V62 FAVORITES: FRONT+BACK+MOCKUP BUNDLE END -->
 
 </body>
 </html>

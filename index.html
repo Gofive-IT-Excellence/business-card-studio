@@ -7599,7 +7599,27 @@ Not: "These are four templates where my logo was inserted."`;
     document.body.style.overflow="";
   }
 
-  function saveSelectedAiDesign(){
+  async function persistSavedMockupImage(src){
+    if(!src || typeof src!=="string") return src || "";
+    if(src.startsWith("data:")) return src;
+
+    try{
+      const res=await fetch(src);
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      const blob=await res.blob();
+      return await new Promise((resolve,reject)=>{
+        const reader=new FileReader();
+        reader.onload=()=>resolve(String(reader.result||src));
+        reader.onerror=()=>reject(reader.error||new Error("FileReader failed"));
+        reader.readAsDataURL(blob);
+      });
+    }catch(e){
+      console.warn("Could not persist mockup image; keeping original URL:",e);
+      return src;
+    }
+  }
+
+  async function saveSelectedAiDesign(){
     const current=currentAiPreviewDesign();
     if(!current){
       if(typeof showToast==="function")showToast("ยังไม่มีดีไซน์ให้บันทึก");
@@ -7607,6 +7627,13 @@ Not: "These are four templates where my logo was inserted."`;
     }
     try{
       const d=clone(current);
+
+      // Persist the AI mockup together with the saved design.
+      // This prevents a temporary/blob/remote URL from disappearing later.
+      if(d.mockupImage){
+        d.mockupImage=await persistSavedMockupImage(d.mockupImage);
+      }
+
       const list=readSavedAiDesigns();
       const existing=list.findIndex(item=>item?.design?.id===d.id);
       const record={
@@ -7622,7 +7649,7 @@ Not: "These are four templates where my logo was inserted."`;
       updateSavedDesignUi();
       renderSavedAiDesigns();
       renderSavedAiDesignsModal();
-      if(typeof showToast==="function")showToast("บันทึกดีไซน์แล้ว");
+      if(typeof showToast==="function")showToast("บันทึกดีไซน์พร้อม Mockup แล้ว");
     }catch(e){
       console.error("Save selected AI design failed:",e);
       if(typeof showToast==="function")showToast("บันทึกดีไซน์ไม่สำเร็จ");

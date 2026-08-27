@@ -7493,8 +7493,8 @@ Not: "These are four templates where my logo was inserted."`;
         updateSavedDesignUi();
       });
 
-      preview.addEventListener("click",()=>{
-        savedPreviewDesign=clone(d);
+      preview.addEventListener("click",async()=>{
+        savedPreviewDesign=await hydrateSavedDesignMockup(item);
         paintMain();
         updateSavedDesignUi();
         const panel=document.querySelector(".ai-design-panel");
@@ -7564,8 +7564,8 @@ Not: "These are four templates where my logo was inserted."`;
       delBtn.textContent="ลบ";
       delBtn.style.cssText="min-height:32px;padding:0 11px;background:#fff;border:1px solid #e7e9ed;color:#9a4b4b;border-radius:999px;font-size:11px;box-shadow:none;";
 
-      const openSaved=()=>{
-        savedPreviewDesign=clone(d);
+      const openSaved=async()=>{
+        savedPreviewDesign=await hydrateSavedDesignMockup(item);
         paintMain();
         updateSavedDesignUi();
         closeSavedDesignsModal();
@@ -7611,24 +7611,68 @@ Not: "These are four templates where my logo was inserted."`;
     document.body.style.overflow="";
   }
 
-  async function persistSavedMockupImage(src){
-    if(!src || typeof src!=="string") return src || "";
-    if(src.startsWith("data:")) return src;
+  const AI_SAVED_DB_NAME="business-card-studio-saved-assets";
+  const AI_SAVED_DB_STORE="mockups";
 
+  function openSavedDesignDb(){
+    return new Promise((resolve,reject)=>{
+      const req=indexedDB.open(AI_SAVED_DB_NAME,1);
+      req.onupgradeneeded=()=>{
+        const db=req.result;
+        if(!db.objectStoreNames.contains(AI_SAVED_DB_STORE)){
+          db.createObjectStore(AI_SAVED_DB_STORE);
+        }
+      };
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>reject(req.error);
+    });
+  }
+
+  async function saveMockupBlobToDb(key,src){
+    if(!key || !src || typeof src!=="string")return false;
     try{
       const res=await fetch(src);
-      if(!res.ok) throw new Error("HTTP "+res.status);
+      if(!res.ok)throw new Error("HTTP "+res.status);
       const blob=await res.blob();
-      return await new Promise((resolve,reject)=>{
-        const reader=new FileReader();
-        reader.onload=()=>resolve(String(reader.result||src));
-        reader.onerror=()=>reject(reader.error||new Error("FileReader failed"));
-        reader.readAsDataURL(blob);
+
+      const db=await openSavedDesignDb();
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction(AI_SAVED_DB_STORE,"readwrite");
+        tx.objectStore(AI_SAVED_DB_STORE).put(blob,key);
+        tx.oncomplete=()=>resolve();
+        tx.onerror=()=>reject(tx.error);
       });
+      db.close();
+      return true;
     }catch(e){
-      console.warn("Could not persist mockup image; keeping original URL:",e);
-      return src;
+      console.warn("Could not cache saved mockup in IndexedDB:",e);
+      return false;
     }
+  }
+
+  async function loadMockupBlobFromDb(key){
+    if(!key)return "";
+    try{
+      const db=await openSavedDesignDb();
+      const blob=await new Promise((resolve,reject)=>{
+        const tx=db.transaction(AI_SAVED_DB_STORE,"readonly");
+        const req=tx.objectStore(AI_SAVED_DB_STORE).get(key);
+        req.onsuccess=()=>resolve(req.result||null);
+        req.onerror=()=>reject(req.error);
+      });
+      db.close();
+      return blob?URL.createObjectURL(blob):"";
+    }catch(e){
+      console.warn("Could not load saved mockup from IndexedDB:",e);
+      return "";
+    }
+  }
+
+  async function hydrateSavedDesignMockup(item){
+    const d=clone(item?.design||{});
+    const dbUrl=await loadMockupBlobFromDb(item?.assetKey||"");
+    if(dbUrl)d.mockupImage=dbUrl;
+    return d;
   }
 
   async function saveSelectedAiDesign(){
@@ -7639,11 +7683,12 @@ Not: "These are four templates where my logo was inserted."`;
     }
     try{
       const d=clone(current);
+      const originalMockup=d.mockupImage||"";
 
-      // Persist the AI mockup together with the saved design.
-      // This prevents a temporary/blob/remote URL from disappearing later.
-      if(d.mockupImage){
-        d.mockupImage=await persistSavedMockupImage(d.mockupImage);
+      // Do not put large base64/mockup images into localStorage.
+      // That storage fills up after ~1 design in many browsers.
+      if(typeof d.mockupImage==="string" && d.mockupImage.startsWith("data:")){
+        d.mockupImage="";
       }
 
       const list=readSavedAiDesigns();
@@ -7654,14 +7699,21 @@ Not: "These are four templates where my logo was inserted."`;
       const key=savedDesignKey(d);
       const existing=list.findIndex(item=>savedDesignKey(item?.design)===key);
 
+      const assetKey="saved-"+Date.now()+"-"+Math.random().toString(36).slice(2,10);
       const record={
         savedAt:new Date().toISOString(),
         activeIndex:active,
+        assetKey,
         design:d
       };
 
+      if(originalMockup){
+        await saveMockupBlobToDb(assetKey,originalMockup);
+      }
+
       if(existing>=0) list[existing]=record;
       else list.unshift(record);
+
       localStorage.setItem(AI_SAVED_DESIGNS_KEY,JSON.stringify(list.slice(0,50)));
       // Keep a direct pointer to the most recently saved AI design as well.
       localStorage.setItem("business-card-studio-last-saved-ai-design",JSON.stringify(record));

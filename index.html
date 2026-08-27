@@ -4139,6 +4139,20 @@ document.addEventListener("DOMContentLoaded", function(){
             </div>
           </div>
           <div class="ai-thumbs" id="aiThumbs" aria-label="AI design options"></div>
+
+          <div id="aiSavedDesignsPanel" style="margin-top:24px;padding-top:20px;border-top:1px solid #e7ebef;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
+              <div>
+                <strong style="font-size:18px;color:#172033;">ดีไซน์ที่บันทึก</strong>
+                <span id="aiSavedDesignCount" style="margin-left:8px;color:#7a8493;font-size:13px;"></span>
+              </div>
+              <button id="aiClearSavedDesignsBtn" type="button" style="min-height:36px;padding:0 14px;border:1px solid #e1e6eb;background:#fff;color:#687385;border-radius:999px;">ล้างทั้งหมด</button>
+            </div>
+            <div id="aiSavedDesigns" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;"></div>
+            <div id="aiSavedDesignsEmpty" style="display:none;padding:18px;border:1px dashed #d6dde4;border-radius:14px;color:#7a8493;text-align:center;background:#fbfcfd;">
+              ยังไม่มีดีไซน์ที่บันทึก — เลือกแบบด้านบนแล้วกด “บันทึกดีไซน์”
+            </div>
+          </div>
         </section>
       </div>
       </div>
@@ -6964,6 +6978,129 @@ document.addEventListener("DOMContentLoaded", function(){
     }
   }
 
+  const NAMI_CREATIVE_HISTORY_KEY="nami-logo-driven-creative-history-v1";
+
+  const NAMI_LAYOUT_POOL=[
+    "asymmetrical editorial grid","modular Swiss grid","bold split composition",
+    "centered identity system","dynamic diagonal composition","image-led composition",
+    "typography-led composition","architectural grid","extreme whitespace composition",
+    "layered geometric composition","offset column system","radial brand composition"
+  ];
+  const NAMI_MOOD_POOL=[
+    "clean premium","modern corporate","quiet luxury","progressive technology",
+    "editorial sophistication","confident minimalism","energetic contemporary",
+    "architectural precision","warm professional","bold modernist","refined creative","future-facing"
+  ];
+  const NAMI_GRAPHIC_POOL=[
+    "logo-derived geometry","negative-space motif from the logo","cropped abstract logo fragments",
+    "brand-shape pattern system","extended lines and angles from the logo","oversized symbol fragment",
+    "modular color blocks derived from the logo","restrained brand gradient","logo-rhythm line system",
+    "repeated micro-pattern derived from the mark","framing system based on logo proportions",
+    "large-scale brand silhouette"
+  ];
+  const NAMI_TYPE_POOL=[
+    "clean corporate typography","geometric typography","editorial typography",
+    "condensed display with neutral body type","modern grotesk hierarchy",
+    "elegant high-contrast hierarchy","Swiss typographic hierarchy","minimal typographic hierarchy"
+  ];
+  const NAMI_PHOTO_POOL=[
+    "portrait-right with generous breathing room","portrait-left integrated with graphics",
+    "large cropped portrait","small portrait with typography dominant","portrait intersecting logo-derived geometry",
+    "portrait framed by negative space","portrait anchored to lower corner","portrait balanced against oversized brand motif"
+  ];
+
+  function namiShuffle(arr){
+    const a=[...arr];
+    for(let i=a.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [a[i],a[j]]=[a[j],a[i]];
+    }
+    return a;
+  }
+
+  function namiCreativeHistory(){
+    try{
+      const raw=localStorage.getItem(NAMI_CREATIVE_HISTORY_KEY);
+      const v=raw?JSON.parse(raw):[];
+      return Array.isArray(v)?v:[];
+    }catch(e){ return []; }
+  }
+
+  function namiBuildCreativeDirections(){
+    const layouts=namiShuffle(NAMI_LAYOUT_POOL);
+    const moods=namiShuffle(NAMI_MOOD_POOL);
+    const graphics=namiShuffle(NAMI_GRAPHIC_POOL);
+    const types=namiShuffle(NAMI_TYPE_POOL);
+    const photos=namiShuffle(NAMI_PHOTO_POOL);
+    const directions=Array.from({length:4},(_,i)=>({
+      id:"D"+(i+1),
+      layout:layouts[i],
+      mood:moods[i],
+      graphicLanguage:graphics[i],
+      typography:types[i%types.length],
+      portraitTreatment:photos[i],
+      visualDensity:["minimal","balanced","expressive","balanced"][i],
+      instruction:[
+        "Derive this concept from the uploaded/customer logo Brand DNA.",
+        "Preserve the original logo exactly; never stretch, redraw, recolor incorrectly, or change its aspect ratio.",
+        "The front and back must form one coherent identity system.",
+        "This direction must be visibly different from the other three in layout, hierarchy, portrait placement, logo placement, whitespace, and graphic structure."
+      ].join(" ")
+    }));
+
+    const history=namiCreativeHistory();
+    history.unshift({
+      at:new Date().toISOString(),
+      seed:Date.now()+"-"+Math.random().toString(36).slice(2,10),
+      directions
+    });
+    localStorage.setItem(NAMI_CREATIVE_HISTORY_KEY,JSON.stringify(history.slice(0,20)));
+    return {directions,history:history.slice(1,9)};
+  }
+
+  function namiLogoDrivenPrompt(creative){
+    return `You are an expert brand identity designer and professional business-card art director.
+
+LOGO-DRIVEN DESIGN RULE:
+The CUSTOMER LOGO is the primary visual DNA. Analyze its dominant/accent colors, geometry, silhouette, curves, angles, lines, negative space, proportions, typography personality, visual rhythm, brand mood and perceived industry. The result must feel specifically designed for this brand, not like a generic template with a logo pasted on top.
+
+Use the logo DNA to derive graphic elements: extend or reinterpret its lines, angles, curves, geometry, negative space, proportions, patterns, frames, grids and color relationships. Graphic elements inspired by the logo may evolve creatively, but the ORIGINAL LOGO itself must remain intact and preserve its exact aspect ratio. Never stretch, squash, redraw or hallucinate the logo.
+
+GENERATE EXACTLY FOUR DISTINCT DIRECTIONS:
+Do not lock the concepts to fixed labels such as Editorial Minimal, Bold Corporate, Executive Dark or Soft Tech. The four concepts must dynamically adapt to the logo while remaining clearly different from one another.
+
+${creative.directions.map((d,i)=>`DESIGN ${String(i+1).padStart(2,"0")}
+Layout: ${d.layout}
+Mood: ${d.mood}
+Graphic language: ${d.graphicLanguage}
+Typography: ${d.typography}
+Portrait treatment: ${d.portraitTreatment}
+Visual density: ${d.visualDensity}
+Rule: ${d.instruction}`).join("\n\n")}
+
+DIVERSITY REQUIREMENT:
+The four designs must differ meaningfully in overall layout, information hierarchy, portrait position/scale, logo position, typography scale, whitespace distribution, graphic structure, front/back composition and use of brand colors. Changing only colors does NOT count as a different concept.
+
+NEW-GENERATION REQUIREMENT:
+Treat every generation as a fresh designer receiving the same brand brief. Preserve brand identity, but explore new composition, hierarchy, motif, portrait treatment, typography relationship and front/back relationship. Avoid repeating recent directions supplied in previousCreativeHistory.
+
+FRONT + BACK:
+Both sides must be one coherent system. The back must not be merely an empty background with a tiny logo. Use meaningful logo-derived graphics, brand pattern, enlarged abstract logo fragment, visual continuation, brand color field, sophisticated negative space, or provided website/QR information.
+
+CUSTOMER DATA:
+Use supplied customer information accurately. Never invent names, positions, phone numbers, email addresses, websites, social accounts or company information.
+
+PORTRAIT:
+If supplied, preserve the person's recognizable appearance. It may be repositioned, cropped or scaled for the concept.
+
+PROFESSIONAL PRINT DESIGN:
+Prioritize clean alignment, readable typography, professional spacing, balanced hierarchy, realistic 90x55 mm business-card composition, intentional negative space and edge-to-edge artwork where appropriate.
+
+FINAL OBJECTIVE:
+The customer should feel: "These designs were created specifically for my brand."
+Not: "These are four templates where my logo was inserted."`;
+  }
+
   async function payload(){
     const s=getSource();
 
@@ -7000,11 +7137,20 @@ document.addEventListener("DOMContentLoaded", function(){
       .filter(v=>/^#[0-9a-f]{6}$/i.test(String(v||""))))]
       .slice(0,12);
 
+    // Logo-driven dynamic art direction: four fresh, brand-related concepts on every NEW generation.
+    const creative=namiBuildCreativeDirections();
+
     // Keep metadata for guidance only. The two raster images above are the layout/content truth.
     const request={
       source:"NAMI Business Card Studio",
       mode:"step2-full-card-raster-v61",
       generationNonce:Date.now()+"-"+Math.random().toString(36).slice(2),
+      creativeSeed:Date.now()+"-"+Math.random().toString(36).slice(2,12),
+      designStrategy:"logo-driven-dynamic-4-directions",
+      logoDriven:true,
+      creativeDirections:creative.directions,
+      previousCreativeHistory:creative.history,
+      designPrompt:namiLogoDrivenPrompt(creative),
       cardSizeMm:{width:90,height:55},
       primaryColor:document.getElementById("aiColorValue")?.textContent?.trim()||"#00BFB3",
       palette:colors,
@@ -7016,6 +7162,8 @@ document.addEventListener("DOMContentLoaded", function(){
         extraText:s.extras
       },
       textContent:s.textContent,
+      logoReferenceImage:s.logoSrc || "",
+      profileReferenceImage:s.profileSrc || "",
 
       // IMPORTANT: THESE TWO COMPLETE PNGs ARE WHAT n8n/AI MUST REDESIGN.
       frontPreviewImage,
@@ -7269,6 +7417,182 @@ document.addEventListener("DOMContentLoaded", function(){
     if(previewHeart) previewHeart.textContent=saved?"♥":"♡";
   }
 
+  function renderSavedAiDesigns(){
+    const wrap=document.getElementById("aiSavedDesigns");
+    const empty=document.getElementById("aiSavedDesignsEmpty");
+    const count=document.getElementById("aiSavedDesignCount");
+    if(!wrap)return;
+
+    const list=readSavedAiDesigns();
+    if(count)count.textContent=list.length?`(${list.length})`:"";
+    wrap.innerHTML="";
+
+    if(!list.length){
+      if(empty)empty.style.display="block";
+      return;
+    }
+    if(empty)empty.style.display="none";
+
+    list.forEach((item,index)=>{
+      const d=item?.design;
+      if(!d)return;
+
+      const card=document.createElement("div");
+      card.style.cssText="position:relative;border:1px solid #e5eaee;border-radius:14px;background:#fff;padding:8px;box-shadow:0 8px 24px rgba(15,23,42,.06);overflow:hidden;";
+
+      const preview=document.createElement("button");
+      preview.type="button";
+      preview.title="เปิดดีไซน์ที่บันทึก";
+      preview.style.cssText="width:100%;min-height:0;padding:0;border:0;border-radius:10px;overflow:hidden;background:#f6f8f9;display:block;box-shadow:none;transform:none;";
+      if(d.artBackground){
+        preview.innerHTML=`<img src="${esc(d.artBackground)}" alt="${esc(d.name||"Saved design")}" style="display:block;width:100%;aspect-ratio:1.75/1;object-fit:cover;">`;
+      }else{
+        preview.innerHTML=`<div style="width:100%;aspect-ratio:1.75/1;overflow:hidden;position:relative;">${cardHtml(d,"front",false)}</div>`;
+      }
+
+      const footer=document.createElement("div");
+      footer.style.cssText="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 2px 2px;";
+      const label=document.createElement("div");
+      label.style.cssText="min-width:0;";
+      const savedDate=item.savedAt?new Date(item.savedAt):null;
+      label.innerHTML=`<div style="font-weight:700;font-size:12px;color:#202733;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(d.name||"Saved Design")}</div>
+        <div style="font-size:10px;color:#8a94a2;">${savedDate&&!isNaN(savedDate)?savedDate.toLocaleString("th-TH"):""}</div>`;
+
+      const del=document.createElement("button");
+      del.type="button";
+      del.textContent="ลบ";
+      del.style.cssText="min-height:30px;padding:0 10px;background:#fff;border:1px solid #e7e9ed;color:#9a4b4b;border-radius:999px;font-size:11px;box-shadow:none;";
+      del.addEventListener("click",(e)=>{
+        e.stopPropagation();
+        const now=readSavedAiDesigns();
+        now.splice(index,1);
+        localStorage.setItem(AI_SAVED_DESIGNS_KEY,JSON.stringify(now));
+        renderSavedAiDesigns();
+        updateSavedDesignUi();
+      });
+
+      preview.addEventListener("click",()=>{
+        if(!designs.length) designs=[clone(d)];
+        else designs[active]=clone(d);
+        paintAll();
+        const panel=document.querySelector(".ai-design-panel");
+        panel?.scrollIntoView({behavior:"smooth",block:"start"});
+        if(typeof showToast==="function")showToast("เปิดดีไซน์ที่บันทึกแล้ว");
+      });
+
+      footer.append(label,del);
+      card.append(preview,footer);
+      wrap.append(card);
+    });
+  }
+
+
+  function renderSavedAiDesignsModal(){
+    const grid=document.getElementById("aiSavedModalGrid");
+    const empty=document.getElementById("aiSavedModalEmpty");
+    const count=document.getElementById("aiSavedModalCount");
+    if(!grid)return;
+
+    const list=readSavedAiDesigns();
+    if(count)count.textContent=list.length?`${list.length} ดีไซน์`:"ยังไม่มีดีไซน์ที่บันทึก";
+    grid.innerHTML="";
+
+    if(!list.length){
+      if(empty)empty.style.display="block";
+      return;
+    }
+    if(empty)empty.style.display="none";
+
+    list.forEach((item,index)=>{
+      const d=item?.design;
+      if(!d)return;
+
+      const card=document.createElement("div");
+      card.style.cssText="border:1px solid #e5eaee;border-radius:16px;background:#fff;padding:10px;box-shadow:0 10px 26px rgba(15,23,42,.06);";
+
+      const preview=document.createElement("button");
+      preview.type="button";
+      preview.style.cssText="width:100%;min-height:0;padding:0;border:0;background:#f6f8f9;border-radius:12px;overflow:hidden;display:block;box-shadow:none;transform:none;";
+      preview.title="เปิดดีไซน์นี้";
+
+      if(d.artBackground){
+        preview.innerHTML=`<img src="${esc(d.artBackground)}" alt="${esc(d.name||"Saved design")}" style="display:block;width:100%;aspect-ratio:1.75/1;object-fit:cover;">`;
+      }else{
+        preview.innerHTML=`<div style="width:100%;aspect-ratio:1.75/1;overflow:hidden;position:relative;">${cardHtml(d,"front",false)}</div>`;
+      }
+
+      const info=document.createElement("div");
+      info.style.cssText="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:10px 2px 2px;";
+      const meta=document.createElement("div");
+      meta.style.cssText="min-width:0;flex:1;";
+      const dt=item.savedAt?new Date(item.savedAt):null;
+      meta.innerHTML=`<div style="font-weight:800;font-size:13px;color:#202733;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(d.name||"Saved Design")}</div>
+        <div style="font-size:10px;color:#8a94a2;margin-top:2px;">${dt&&!isNaN(dt)?dt.toLocaleString("th-TH"):""}</div>`;
+
+      const actions=document.createElement("div");
+      actions.style.cssText="display:flex;gap:6px;";
+
+      const openBtn=document.createElement("button");
+      openBtn.type="button";
+      openBtn.textContent="เปิด";
+      openBtn.style.cssText="min-height:32px;padding:0 11px;background:#08bfb7;color:#fff;border:0;border-radius:999px;font-size:11px;font-weight:700;box-shadow:none;";
+
+      const delBtn=document.createElement("button");
+      delBtn.type="button";
+      delBtn.textContent="ลบ";
+      delBtn.style.cssText="min-height:32px;padding:0 11px;background:#fff;border:1px solid #e7e9ed;color:#9a4b4b;border-radius:999px;font-size:11px;box-shadow:none;";
+
+      const openSaved=()=>{
+        if(!designs.length){
+          designs=[clone(d)];
+          active=0;
+        }else{
+          designs[active]=clone(d);
+        }
+        paintAll();
+        closeSavedDesignsModal();
+        const panel=document.querySelector(".ai-design-panel");
+        panel?.scrollIntoView({behavior:"smooth",block:"start"});
+        if(typeof showToast==="function")showToast("เปิดดีไซน์ที่บันทึกแล้ว");
+      };
+
+      preview.addEventListener("click",openSaved);
+      openBtn.addEventListener("click",openSaved);
+
+      delBtn.addEventListener("click",(e)=>{
+        e.stopPropagation();
+        const now=readSavedAiDesigns();
+        now.splice(index,1);
+        localStorage.setItem(AI_SAVED_DESIGNS_KEY,JSON.stringify(now));
+        renderSavedAiDesigns();
+        renderSavedAiDesignsModal();
+        updateSavedDesignUi();
+      });
+
+      actions.append(openBtn,delBtn);
+      info.append(meta,actions);
+      card.append(preview,info);
+      grid.append(card);
+    });
+  }
+
+  function openSavedDesignsModal(){
+    const modal=document.getElementById("aiSavedDesignsModal");
+    if(!modal)return;
+    renderSavedAiDesignsModal();
+    modal.style.display="flex";
+    modal.setAttribute("aria-hidden","false");
+    document.body.style.overflow="hidden";
+  }
+
+  function closeSavedDesignsModal(){
+    const modal=document.getElementById("aiSavedDesignsModal");
+    if(!modal)return;
+    modal.style.display="none";
+    modal.setAttribute("aria-hidden","true");
+    document.body.style.overflow="";
+  }
+
   function saveSelectedAiDesign(){
     if(!designs.length){
       if(typeof showToast==="function")showToast("ยังไม่มีดีไซน์ให้บันทึก");
@@ -7289,6 +7613,8 @@ document.addEventListener("DOMContentLoaded", function(){
       // Keep a direct pointer to the most recently saved AI design as well.
       localStorage.setItem("business-card-studio-last-saved-ai-design",JSON.stringify(record));
       updateSavedDesignUi();
+      renderSavedAiDesigns();
+      renderSavedAiDesignsModal();
       if(typeof showToast==="function")showToast("บันทึกดีไซน์แล้ว");
     }catch(e){
       console.error("Save selected AI design failed:",e);
@@ -7300,8 +7626,42 @@ document.addEventListener("DOMContentLoaded", function(){
     document.getElementById("aiSaveSelectedDesignBtn")?.addEventListener("click",saveSelectedAiDesign);
     document.getElementById("aiFavoritePreviewBtn")?.addEventListener("click",saveSelectedAiDesign);
     // Use capture so the older decorative heart handler cannot cancel persistence.
-    document.getElementById("aiFavoriteBtn")?.addEventListener("click",saveSelectedAiDesign,true);
+    document.getElementById("aiFavoriteBtn")?.addEventListener("click",(e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      openSavedDesignsModal();
+    },true);
+
+    document.getElementById("aiCloseSavedModalBtn")?.addEventListener("click",closeSavedDesignsModal);
+    document.getElementById("aiSavedDesignsModal")?.addEventListener("click",(e)=>{
+      if(e.target===e.currentTarget) closeSavedDesignsModal();
+    });
+    document.addEventListener("keydown",(e)=>{
+      if(e.key==="Escape") closeSavedDesignsModal();
+    });
+
+    document.getElementById("aiClearSavedModalBtn")?.addEventListener("click",()=>{
+      if(!readSavedAiDesigns().length)return;
+      if(confirm("ล้างดีไซน์ที่บันทึกทั้งหมดหรือไม่?")){
+        localStorage.removeItem(AI_SAVED_DESIGNS_KEY);
+        localStorage.removeItem("business-card-studio-last-saved-ai-design");
+        updateSavedDesignUi();
+        renderSavedAiDesigns();
+        renderSavedAiDesignsModal();
+      }
+    });
+
+    document.getElementById("aiClearSavedDesignsBtn")?.addEventListener("click",()=>{
+      if(!readSavedAiDesigns().length)return;
+      if(confirm("ล้างดีไซน์ที่บันทึกทั้งหมดหรือไม่?")){
+        localStorage.removeItem(AI_SAVED_DESIGNS_KEY);
+        localStorage.removeItem("business-card-studio-last-saved-ai-design");
+        updateSavedDesignUi();
+        renderSavedAiDesigns();
+      }
+    });
     updateSavedDesignUi();
+    renderSavedAiDesigns();
   }
 
   const V65_JOB_STORAGE_KEY="nami_business_card_v65_job";
@@ -7758,6 +8118,34 @@ document.addEventListener("DOMContentLoaded", function(){
 })();
 </script>
 <!-- MAMI FLOATING CHATBOT END -->
+
+
+  <div id="aiSavedDesignsModal" aria-hidden="true" style="
+    position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;
+    padding:24px;background:rgba(15,23,42,.38);backdrop-filter:blur(8px);">
+    <div style="
+      width:min(1100px,96vw);max-height:88vh;overflow:hidden;background:#fff;border-radius:24px;
+      box-shadow:0 28px 90px rgba(15,23,42,.28);border:1px solid #e6ebef;display:flex;flex-direction:column;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 22px;border-bottom:1px solid #edf1f4;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#172033;">ดีไซน์ที่บันทึก</div>
+          <div id="aiSavedModalCount" style="margin-top:2px;font-size:13px;color:#7a8493;"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button id="aiClearSavedModalBtn" type="button" style="min-height:38px;padding:0 14px;border:1px solid #e1e6eb;background:#fff;color:#687385;border-radius:999px;box-shadow:none;">ล้างทั้งหมด</button>
+          <button id="aiCloseSavedModalBtn" type="button" aria-label="ปิด" style="width:40px;min-height:40px;padding:0;border:1px solid #e1e6eb;background:#fff;color:#172033;border-radius:999px;font-size:20px;box-shadow:none;">×</button>
+        </div>
+      </div>
+
+      <div style="padding:20px 22px 24px;overflow:auto;">
+        <div id="aiSavedModalGrid" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;"></div>
+        <div id="aiSavedModalEmpty" style="display:none;padding:34px 18px;border:1px dashed #d6dde4;border-radius:16px;color:#7a8493;text-align:center;background:#fbfcfd;">
+          ยังไม่มีดีไซน์ที่บันทึก<br>
+          <span style="font-size:12px;">เลือกแบบที่ชอบแล้วกด “บันทึกดีไซน์”</span>
+        </div>
+      </div>
+    </div>
+  </div>
 
 </body>
 </html>

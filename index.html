@@ -4134,7 +4134,8 @@ document.addEventListener("DOMContentLoaded", function(){
             <button class="ai-preview-btn" id="aiLargePreviewBtn" type="button">⌕ ดูภาพใหญ่ (คลิกที่ภาพ)</button>
             <div>
               <button class="ai-use-btn" id="aiUseDesignBtn" type="button">✓ ใช้แบบนี้</button>
-              <button class="ai-heart-btn" type="button" aria-label="บันทึกแบบที่ชอบ">♡</button>
+              <button class="ai-use-btn" id="aiSaveSelectedDesignBtn" type="button">♡ บันทึกดีไซน์</button>
+              <button class="ai-heart-btn" id="aiFavoritePreviewBtn" type="button" aria-label="บันทึกแบบที่ชอบ">♡</button>
             </div>
           </div>
           <div class="ai-thumbs" id="aiThumbs" aria-label="AI design options"></div>
@@ -7237,7 +7238,71 @@ document.addEventListener("DOMContentLoaded", function(){
       }
     }
   }
-  function paintAll(){paintMain();paintThumbs()}
+  function paintAll(){paintMain();paintThumbs();updateSavedDesignUi()}
+
+  const AI_SAVED_DESIGNS_KEY="business-card-studio-saved-ai-designs";
+
+  function readSavedAiDesigns(){
+    try{
+      const raw=localStorage.getItem(AI_SAVED_DESIGNS_KEY);
+      const list=raw?JSON.parse(raw):[];
+      return Array.isArray(list)?list:[];
+    }catch(e){
+      console.warn("Read saved AI designs failed:",e);
+      return [];
+    }
+  }
+
+  function isCurrentAiDesignSaved(){
+    if(!designs.length)return false;
+    const d=designs[active];
+    return readSavedAiDesigns().some(item=>item?.design?.id===d?.id);
+  }
+
+  function updateSavedDesignUi(){
+    const saved=isCurrentAiDesignSaved();
+    const btn=document.getElementById("aiSaveSelectedDesignBtn");
+    const topHeart=document.getElementById("aiFavoriteBtn");
+    const previewHeart=document.getElementById("aiFavoritePreviewBtn");
+    if(btn) btn.textContent=saved?"✓ บันทึกแล้ว":"♡ บันทึกดีไซน์";
+    if(topHeart) topHeart.textContent=saved?"♥":"♡";
+    if(previewHeart) previewHeart.textContent=saved?"♥":"♡";
+  }
+
+  function saveSelectedAiDesign(){
+    if(!designs.length){
+      if(typeof showToast==="function")showToast("ยังไม่มีดีไซน์ให้บันทึก");
+      return;
+    }
+    try{
+      const d=clone(designs[active]);
+      const list=readSavedAiDesigns();
+      const existing=list.findIndex(item=>item?.design?.id===d.id);
+      const record={
+        savedAt:new Date().toISOString(),
+        activeIndex:active,
+        design:d
+      };
+      if(existing>=0) list[existing]=record;
+      else list.unshift(record);
+      localStorage.setItem(AI_SAVED_DESIGNS_KEY,JSON.stringify(list.slice(0,50)));
+      // Keep a direct pointer to the most recently saved AI design as well.
+      localStorage.setItem("business-card-studio-last-saved-ai-design",JSON.stringify(record));
+      updateSavedDesignUi();
+      if(typeof showToast==="function")showToast("บันทึกดีไซน์แล้ว");
+    }catch(e){
+      console.error("Save selected AI design failed:",e);
+      if(typeof showToast==="function")showToast("บันทึกดีไซน์ไม่สำเร็จ");
+    }
+  }
+
+  function bindAiSaveControls(){
+    document.getElementById("aiSaveSelectedDesignBtn")?.addEventListener("click",saveSelectedAiDesign);
+    document.getElementById("aiFavoritePreviewBtn")?.addEventListener("click",saveSelectedAiDesign);
+    // Use capture so the older decorative heart handler cannot cancel persistence.
+    document.getElementById("aiFavoriteBtn")?.addEventListener("click",saveSelectedAiDesign,true);
+    updateSavedDesignUi();
+  }
 
   const V65_JOB_STORAGE_KEY="nami_business_card_v65_job";
 
@@ -7443,6 +7508,7 @@ document.addEventListener("DOMContentLoaded", function(){
     },120);
   },true);
 
+  bindAiSaveControls();
   window.NAMI_AI_V3={generate,useSelected,get designs(){return designs}};
 })();
 </script>

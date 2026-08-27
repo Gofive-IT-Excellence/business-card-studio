@@ -7411,10 +7411,22 @@ Not: "These are four templates where my logo was inserted."`;
     }
   }
 
+  function savedDesignKey(d){
+    if(!d)return "";
+    return [
+      String(d.id||""),
+      String(d.name||""),
+      String(d.artBackground||""),
+      String(d.artBackgroundBack||""),
+      String(d.mockupImage||"")
+    ].join("||");
+  }
+
   function isCurrentAiDesignSaved(){
     const d=currentAiPreviewDesign();
     if(!d)return false;
-    return readSavedAiDesigns().some(item=>item?.design?.id===d?.id);
+    const key=savedDesignKey(d);
+    return readSavedAiDesigns().some(item=>savedDesignKey(item?.design)===key);
   }
 
   function updateSavedDesignUi(){
@@ -7635,12 +7647,19 @@ Not: "These are four templates where my logo was inserted."`;
       }
 
       const list=readSavedAiDesigns();
-      const existing=list.findIndex(item=>item?.design?.id===d.id);
+
+      // Each visually different AI design gets its own saved record.
+      // Some n8n responses reuse the same "id" for all 4 concepts,
+      // so using only d.id caused every new save to overwrite the first one.
+      const key=savedDesignKey(d);
+      const existing=list.findIndex(item=>savedDesignKey(item?.design)===key);
+
       const record={
         savedAt:new Date().toISOString(),
         activeIndex:active,
         design:d
       };
+
       if(existing>=0) list[existing]=record;
       else list.unshift(record);
       localStorage.setItem(AI_SAVED_DESIGNS_KEY,JSON.stringify(list.slice(0,50)));

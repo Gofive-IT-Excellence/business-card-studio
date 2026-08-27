@@ -7703,7 +7703,19 @@ Not: "These are four templates where my logo was inserted."`;
   async function waitForAiResult(jobId){
     console.log("V65 jobId:",jobId);
 
+    // FIX ONLY: prevent the loading screen from polling forever.
+    // Normal jobs may still take a few minutes, but after 6 minutes
+    // the browser stops waiting and lets the user try again.
+    const startedAt=Date.now();
+    const MAX_WAIT_MS=6*60*1000;
+
     while(true){
+      if(Date.now()-startedAt>MAX_WAIT_MS){
+        const err=new Error("AI_RESULT_TIMEOUT");
+        err.isTimeout=true;
+        throw err;
+      }
+
       await new Promise(r=>setTimeout(r,4000));
 
       const status=document.getElementById("aiCreatingStatus");
@@ -7830,13 +7842,18 @@ Not: "These are four templates where my logo was inserted."`;
         // Only an explicit status:error from the result webhook is a real workflow failure.
         if(status) status.textContent="AI สร้างงานไม่สำเร็จ กรุณากดสร้างใหม่";
         sessionStorage.removeItem(V65_JOB_STORAGE_KEY);
+        hideAiCreating();
         if(typeof showToast==="function")showToast("AI สร้างงานไม่สำเร็จ");
+      }else if(e?.isTimeout){
+        // FIX ONLY: stop the endless spinner when n8n never reaches status=done.
+        sessionStorage.removeItem(V65_JOB_STORAGE_KEY);
+        hideAiCreating();
+        if(typeof showToast==="function")showToast("AI ใช้เวลานานเกิน 6 นาที กรุณาตรวจ n8n แล้วกดสร้างใหม่");
       }else{
-        // Network/start-response problems must NOT expose old designs or declare the workflow stopped.
-        if(status) status.textContent="AI กำลังสร้างงาน....";
+        // Keep transient network retry behavior, but do not create a permanent pending job.
+        if(status) status.textContent="กำลังเชื่อมต่อผล AI ใหม่...";
         if(typeof showToast==="function")showToast("กำลังเชื่อมต่อผล AI ใหม่อัตโนมัติ");
 
-        // If we already know the jobId, resume polling automatically.
         if(jobId){
           sessionStorage.setItem(V65_JOB_STORAGE_KEY,jobId);
           busy=false;

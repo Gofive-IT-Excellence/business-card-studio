@@ -4024,7 +4024,7 @@ document.addEventListener("DOMContentLoaded", function(){
         <section class="canvas-wrap">
           <div class="editor-toolbar">
             <div class="left"><button id="undoBtn" class="icon-btn" title="Undo">↶</button><button id="redoBtn" class="icon-btn" title="Redo">↷</button></div>
-            <div class="right"><button id="duplicateBtn">คัดลอก</button><button id="frontBtn">นำไปข้างหน้า</button><button id="backBtn">ส่งไปข้างหลัง</button><button id="deleteBtn" class="danger">ลบ</button><button id="downloadSvg">SVG</button><button id="lockBgTopBtn" class="bg-lock-control" type="button">ล็อกพื้นหลัง</button><button id="unlockBgTopBtn" class="bg-lock-control" type="button">ปลดล็อก</button><button id="generateImageBtn" class="generate-card-btn" type="button">Generate ✦</button><button id="downloadPng" class="primary">ดาวน์โหลด PNG</button></div>
+            <div class="right"><button id="duplicateBtn">คัดลอก</button><button id="frontBtn">นำไปข้างหน้า</button><button id="backBtn">ส่งไปข้างหลัง</button><button id="deleteBtn" class="danger">ลบ</button><button id="downloadSvg">SVG</button><button id="saveDesignBtn" type="button">บันทึกดีไซน์</button><button id="lockBgTopBtn" class="bg-lock-control" type="button">ล็อกพื้นหลัง</button><button id="unlockBgTopBtn" class="bg-lock-control" type="button">ปลดล็อก</button><button id="generateImageBtn" class="generate-card-btn" type="button">Generate ✦</button><button id="downloadPng" class="primary">ดาวน์โหลด PNG</button></div>
           </div>
           <div class="side-tabs"><button id="frontSideBtn" class="active" type="button">ด้านหน้า</button><button id="backSideBtn" type="button">ด้านหลัง</button></div>
           <div class="stage" id="stage">
@@ -6314,6 +6314,19 @@ document.addEventListener("DOMContentLoaded", function(){
       if(step==="4"){ document.getElementById("downloadPng").scrollIntoView({behavior:"smooth",block:"center"}); showToast("เลือกดาวน์โหลด PNG หรือ SVG ได้เลย"); }
     }));
 
+
+    // Save design only: persist the current editor snapshot without touching AI/prompt workflow.
+    document.getElementById("saveDesignBtn")?.addEventListener("click", () => {
+      try {
+        saveActiveSide();
+        const snapshot = snapshotEditorState();
+        localStorage.setItem("business-card-studio-saved-design", JSON.stringify(snapshot));
+        showToast("บันทึกดีไซน์แล้ว");
+      } catch (error) {
+        console.error("Save design failed:", error);
+        showToast("บันทึกดีไซน์ไม่สำเร็จ");
+      }
+    });
 
     // Save side before exports and export the currently active face.
     ["downloadSvg","downloadPng"].forEach(id=>document.getElementById(id).addEventListener("click",saveActiveSide,{capture:true}));

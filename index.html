@@ -3809,6 +3809,42 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 <!-- AI THUMBNAILS ALWAYS VISIBLE END -->
 
+
+<style id="nami-hero-visibility-fix-only">
+/* V8: HERO IMAGE VISIBILITY FIX ONLY.
+   Scoped to the landing-page hero visual; no other UI/logic is modified. */
+.hero-visual img,
+.hero-image img,
+.hero-media img,
+.hero-slider img,
+.hero-carousel img,
+.hero-right img,
+.hero-art img {
+  opacity: 1 !important;
+  filter: none !important;
+  -webkit-filter: none !important;
+  mix-blend-mode: normal !important;
+}
+
+/* Do not allow a decorative white veil/mask to wash out the hero artwork. */
+.hero-visual::before,
+.hero-visual::after,
+.hero-image::before,
+.hero-image::after,
+.hero-media::before,
+.hero-media::after,
+.hero-slider::before,
+.hero-slider::after,
+.hero-carousel::before,
+.hero-carousel::after,
+.hero-right::before,
+.hero-right::after,
+.hero-art::before,
+.hero-art::after {
+  pointer-events: none !important;
+}
+</style>
+
 </head>
 <body id="top">
   <header class="topbar">

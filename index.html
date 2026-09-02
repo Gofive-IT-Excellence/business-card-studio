@@ -6591,7 +6591,7 @@ document.addEventListener("DOMContentLoaded", function(){
   }
 </style>
 
-<script id="nami-ai-v3-script" data-build="V65-RESULT-DELIVERY-FIX">
+<script id="nami-ai-v3-script" data-build="V68-ERROR-DELIVERY-FIX">
 (function(){
   const WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v60";
   const RESULT_WEBHOOK_URL="https://n8n.tks.co.th/webhook/business-card-ai-v60-result";
@@ -6623,7 +6623,7 @@ document.addEventListener("DOMContentLoaded", function(){
       <div class="ai-creating-orb"></div>
       <h3>AI กำลังสร้าง Design...</h3>
       <p class="ai-creating-status" id="aiCreatingStatus">AI กำลังสร้างงาน....</p>
-      <p class="ai-creating-note">ระบบกำลังสร้าง Art Direction 4 แบบ อาจใช้เวลาประมาณ 2–4 นาที</p>
+      <p class="ai-creating-note">ระบบกำลังสร้าง Art Direction 4 แบบ อาจใช้เวลาประมาณ 6–10 นาที</p>
       <div class="ai-creating-progress"><span></span></div>
       <div class="ai-creating-steps">
         <div class="ai-creating-step is-active">1 วิเคราะห์งาน</div>
@@ -7769,12 +7769,14 @@ Not: "These are four templates where my logo was inserted."`;
     renderSavedAiDesigns();
   }
 
-  const V65_JOB_STORAGE_KEY="nami_business_card_v65_job";
+  const V65_JOB_STORAGE_KEY="nami_business_card_v68_job";
 
   async function waitForAiResult(jobId){
-    console.log("V65 jobId:",jobId);
+    console.log("V68 jobId:",jobId);
+    const pollStartedAt=Date.now();
+    const maxPollMs=12*60*1000;
 
-    while(true){
+    while(Date.now()-pollStartedAt<maxPollMs){
       await new Promise(r=>setTimeout(r,4000));
 
       const status=document.getElementById("aiCreatingStatus");
@@ -7834,6 +7836,10 @@ Not: "These are four templates where my logo was inserted."`;
         console.warn("V65 poll retry:",err);
       }
     }
+
+    const timeoutError=new Error("AI_TIMEOUT: ระบบไม่ได้รับผลลัพธ์ภายใน 12 นาที");
+    timeoutError.isWorkflowError=true;
+    throw timeoutError;
   }
 
   async function generate(resumeJobId=""){
@@ -7907,9 +7913,9 @@ Not: "These are four templates where my logo was inserted."`;
 
       if(e?.isWorkflowError){
         // Only an explicit status:error from the result webhook is a real workflow failure.
-        if(status) status.textContent="AI สร้างงานไม่สำเร็จ กรุณากดสร้างใหม่";
+        if(status) status.textContent=(String(e?.message||"").includes("AI_TIMEOUT")?"ระบบไม่ได้รับผลลัพธ์ภายใน 12 นาที กรุณากดสร้างใหม่":"AI สร้างงานไม่สำเร็จ กรุณากดสร้างใหม่");
         sessionStorage.removeItem(V65_JOB_STORAGE_KEY);
-        if(typeof showToast==="function")showToast("AI สร้างงานไม่สำเร็จ");
+        if(typeof showToast==="function")showToast(String(e?.message||"").includes("AI_TIMEOUT")?"หมดเวลารอผล AI กรุณาสร้างใหม่":"AI สร้างงานไม่สำเร็จ");
       }else{
         // Network/start-response problems must NOT expose old designs or declare the workflow stopped.
         if(status) status.textContent="AI กำลังสร้างงาน....";
